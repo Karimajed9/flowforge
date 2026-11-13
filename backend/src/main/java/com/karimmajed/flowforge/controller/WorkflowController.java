@@ -4,6 +4,7 @@ import com.karimmajed.flowforge.dto.CreateWorkflowRequest;
 import com.karimmajed.flowforge.dto.UpdateWorkflowStatusRequest;
 import com.karimmajed.flowforge.dto.WorkflowResponse;
 import com.karimmajed.flowforge.service.WorkflowService;
+import com.karimmajed.flowforge.dto.WebhookTokenResponse;
 
 import jakarta.validation.Valid;
 
@@ -50,5 +51,12 @@ public class WorkflowController {
             @Valid @RequestBody UpdateWorkflowStatusRequest request) {
 
         return service.updateStatus(id, request);
+    }
+
+    @PostMapping("/{id}/webhook-token")
+    public WebhookTokenResponse rotateWebhookToken(
+            @PathVariable Long id) {
+
+        return service.rotateWebhookToken(id);
     }
 }

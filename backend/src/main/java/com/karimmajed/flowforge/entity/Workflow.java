@@ -23,6 +23,9 @@ public class Workflow {
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
+    @Column(name = "webhook_token_hash", length = 64, unique = true)
+    private String webhookTokenHash;
+
     protected Workflow() {
     }
 
@@ -60,5 +63,9 @@ public class Workflow {
 
     public void setActive(boolean active) {
         this.active = active;
+    }
+
+    public void setWebhookTokenHash(String webhookTokenHash) {
+        this.webhookTokenHash = webhookTokenHash;
     }
 }

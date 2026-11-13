@@ -5,6 +5,7 @@ import com.karimmajed.flowforge.dto.UpdateWorkflowStatusRequest;
 import com.karimmajed.flowforge.dto.WorkflowResponse;
 import com.karimmajed.flowforge.entity.Workflow;
 import com.karimmajed.flowforge.repository.WorkflowRepository;
+import com.karimmajed.flowforge.dto.WebhookTokenResponse;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -17,9 +18,11 @@ import java.util.List;
 public class WorkflowService {
 
     private final WorkflowRepository repository;
+    private final WebhookTokenService webhookTokenService;
 
-    public WorkflowService(WorkflowRepository repository) {
+    public WorkflowService(WorkflowRepository repository, WebhookTokenService tokenService) {
         this.repository = repository;
+        this.webhookTokenService = tokenService;
     }
 
     @Transactional
@@ -65,5 +68,19 @@ public class WorkflowService {
                 HttpStatus.NOT_FOUND,
                 "Workflow not found"
             ));
+    }
+
+    @Transactional
+    public WebhookTokenResponse rotateWebhookToken(Long workflowId) {
+
+        Workflow workflow = findWorkflow(workflowId);
+
+        String token = webhookTokenService.generateToken();
+
+        workflow.setWebhookTokenHash(
+            webhookTokenService.hashToken(token)
+        );
+
+        return new WebhookTokenResponse(token);
     }
 }
