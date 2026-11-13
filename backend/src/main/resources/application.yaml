@@ -1,0 +1,25 @@
+
+spring:
+  application:
+    name: flowforge
+
+  datasource:
+    url: jdbc:postgresql://localhost:5433/flowforge
+    username: flowforge
+    password: flowforge_dev
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: flowforge
+    password: flowforge_dev
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
