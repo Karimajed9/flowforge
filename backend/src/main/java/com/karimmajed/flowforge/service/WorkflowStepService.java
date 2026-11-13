@@ -3,6 +3,7 @@ package com.karimmajed.flowforge.service;
 import com.karimmajed.flowforge.dto.*;
 import com.karimmajed.flowforge.entity.*;
 import com.karimmajed.flowforge.repository.*;
+import com.karimmajed.flowforge.validation.StepConfigurationValidator;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -16,12 +17,15 @@ public class WorkflowStepService {
 
     private final WorkflowRepository workflowRepository;
     private final WorkflowStepRepository stepRepository;
+    private final StepConfigurationValidator configurationValidator;
 
     public WorkflowStepService(
             WorkflowRepository workflowRepository,
-            WorkflowStepRepository stepRepository) {
+            WorkflowStepRepository stepRepository,
+            StepConfigurationValidator configurationValidator) {
         this.workflowRepository = workflowRepository;
         this.stepRepository = stepRepository;
+        this.configurationValidator = configurationValidator;
     }
 
     @Transactional
@@ -33,6 +37,11 @@ public class WorkflowStepService {
             .orElseThrow(() -> new ResponseStatusException(
                 HttpStatus.NOT_FOUND, "Workflow not found"
             ));
+
+        configurationValidator.validate(
+            request.stepType(),
+            request.configuration()
+        );
 
         if (stepRepository.existsByWorkflow_IdAndPosition(
                 workflowId, request.position())) {
@@ -48,6 +57,8 @@ public class WorkflowStepService {
             request.stepType(),
             request.position()
         );
+
+        step.setConfiguration(request.configuration());
 
         return WorkflowStepResponse.from(
             stepRepository.save(step)

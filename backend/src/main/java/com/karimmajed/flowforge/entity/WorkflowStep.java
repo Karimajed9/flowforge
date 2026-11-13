@@ -2,6 +2,10 @@ package com.karimmajed.flowforge.entity;
 
 import com.karimmajed.flowforge.enums.StepType;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+import java.util.HashMap;
+import java.util.Map;
 
 @Entity
 @Table(name = "workflow_steps")
@@ -24,6 +28,12 @@ public class WorkflowStep {
 
     @Column(nullable = false)
     private int position;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "configuration",
+            columnDefinition = "jsonb",
+            nullable = false)
+    private Map<String, Object> configuration = new HashMap<>();
 
     protected WorkflowStep() {
     }
@@ -53,5 +63,13 @@ public class WorkflowStep {
 
     public int getPosition() {
         return position;
+    }
+
+    public Map<String, Object> getConfiguration() {
+        return configuration;
+    }
+
+    public void setConfiguration(Map<String, Object> configuration) {
+        this.configuration = configuration;
     }
 }
