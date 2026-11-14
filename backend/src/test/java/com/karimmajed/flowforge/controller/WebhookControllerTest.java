@@ -20,6 +20,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.OffsetDateTime;
 import java.util.Map;
 
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -64,7 +65,8 @@ class WebhookControllerTest {
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.id").value(21))
             .andExpect(jsonPath("$.workflowId").value(7))
-            .andExpect(jsonPath("$.status").value("RECEIVED"));
+            .andExpect(jsonPath("$.status").value("RECEIVED"))
+            .andExpect(jsonPath("$.failureReason").value(nullValue()));
 
         verify(service).trigger(
             eq("valid-token"),

@@ -38,3 +38,6 @@ management:
 flowforge:
   outbox:
     poll-interval-ms: 2000
+
+  consumer:
+    enabled: true

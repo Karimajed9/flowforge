@@ -3,13 +3,13 @@ package com.karimmajed.flowforge.entity;
 import com.karimmajed.flowforge.enums.ExecutionStatus;
 
 import jakarta.persistence.*;
-
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Map;
+import java.util.Objects;
 
 @Entity
 @Table(name = "workflow_executions")
@@ -37,6 +37,9 @@ public class WorkflowExecution {
         length = 128
     )
     private String idempotencyKey;
+
+    @Column(name = "failure_reason", length = 1000)
+    private String failureReason;
 
     @Column(
         name = "created_at",
@@ -66,6 +69,53 @@ public class WorkflowExecution {
         }
     }
 
+    public void markQueued() {
+        if (status != ExecutionStatus.RECEIVED) {
+            throw new IllegalStateException(
+                "Only RECEIVED executions can become QUEUED"
+            );
+        }
+
+        status = ExecutionStatus.QUEUED;
+    }
+
+    public void markRunning() {
+        if (status != ExecutionStatus.RECEIVED
+                && status != ExecutionStatus.QUEUED) {
+            throw new IllegalStateException(
+                "Cannot start execution from " + status
+            );
+        }
+
+        status = ExecutionStatus.RUNNING;
+    }
+
+    public void markSucceeded() {
+        if (status != ExecutionStatus.RUNNING) {
+            throw new IllegalStateException(
+                "Only RUNNING executions can succeed"
+            );
+        }
+
+        status = ExecutionStatus.SUCCEEDED;
+        failureReason = null;
+    }
+
+    public void markFailed(String reason) {
+        if (status != ExecutionStatus.RUNNING) {
+            throw new IllegalStateException(
+                "Only RUNNING executions can fail"
+            );
+        }
+
+        String message = Objects.requireNonNull(reason);
+
+        status = ExecutionStatus.FAILED;
+        failureReason = message.length() > 1000
+            ? message.substring(0, 1000)
+            : message;
+    }
+
     public Long getId() {
         return id;
     }
@@ -86,17 +136,11 @@ public class WorkflowExecution {
         return idempotencyKey;
     }
 
-    public OffsetDateTime getCreatedAt() {
-        return createdAt;
+    public String getFailureReason() {
+        return failureReason;
     }
 
-    public void markQueued() {
-        if (status != ExecutionStatus.RECEIVED) {
-            throw new IllegalStateException(
-                "Only RECEIVED executions can become QUEUED"
-            );
-        }
-    
-        this.status = ExecutionStatus.QUEUED;
+    public OffsetDateTime getCreatedAt() {
+        return createdAt;
     }
 }

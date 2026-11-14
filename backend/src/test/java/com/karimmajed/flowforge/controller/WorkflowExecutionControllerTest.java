@@ -17,6 +17,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.OffsetDateTime;
 import java.util.List;
 
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -42,9 +43,26 @@ class WorkflowExecutionControllerTest {
                 .andExpect(jsonPath("$.id").value(21))
                 .andExpect(jsonPath("$.workflowId").value(7))
                 .andExpect(jsonPath("$.status").value("RECEIVED"))
-                .andExpect(jsonPath("$.createdAt").value("2026-11-13T17:02:00Z"));
+                .andExpect(jsonPath("$.createdAt").value("2026-11-13T17:02:00Z"))
+                .andExpect(jsonPath("$.failureReason").value(nullValue()));
 
         verify(service).getById(21L);
+    }
+
+    @Test
+    void getExecutionReturnsTheFailureReason() throws Exception {
+        when(service.getById(21L)).thenReturn(new WorkflowExecutionResponse(
+                21L,
+                7L,
+                ExecutionStatus.FAILED,
+                OffsetDateTime.parse("2026-11-13T17:02:00Z"),
+                "Unsupported executor: HTTP_REQUEST"));
+
+        mockMvc.perform(get("/api/executions/{id}", 21))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FAILED"))
+                .andExpect(jsonPath("$.failureReason")
+                        .value("Unsupported executor: HTTP_REQUEST"));
     }
 
     @Test
@@ -67,6 +85,7 @@ class WorkflowExecutionControllerTest {
                 .andExpect(jsonPath("$.content[0].id").value(21))
                 .andExpect(jsonPath("$.content[0].workflowId").value(7))
                 .andExpect(jsonPath("$.content[0].status").value("RECEIVED"))
+                .andExpect(jsonPath("$.content[0].failureReason").value(nullValue()))
                 .andExpect(jsonPath("$.totalElements").value(1));
 
         verify(service).getByWorkflow(7L, 0, 20);
