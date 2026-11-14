@@ -6,6 +6,8 @@ import com.karimmajed.flowforge.entity.Workflow;
 import com.karimmajed.flowforge.entity.WorkflowExecution;
 import com.karimmajed.flowforge.repository.WorkflowExecutionRepository;
 import com.karimmajed.flowforge.repository.WorkflowRepository;
+import com.karimmajed.flowforge.entity.ExecutionOutboxEvent;
+import com.karimmajed.flowforge.repository.ExecutionOutboxRepository;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -20,15 +22,18 @@ public class WebhookService {
     private final WorkflowRepository workflowRepository;
     private final WorkflowExecutionRepository executionRepository;
     private final WebhookTokenService tokenService;
+    private final ExecutionOutboxRepository outboxRepository;
 
     public WebhookService(
             WorkflowRepository workflowRepository,
             WorkflowExecutionRepository executionRepository,
-            WebhookTokenService tokenService) {
+            WebhookTokenService tokenService,
+            ExecutionOutboxRepository outboxRepository) {
 
         this.workflowRepository = workflowRepository;
         this.executionRepository = executionRepository;
         this.tokenService = tokenService;
+        this.outboxRepository = outboxRepository;
     }
 
     @Transactional
@@ -77,15 +82,20 @@ public class WebhookService {
 
         // New event: create an execution.
         WorkflowExecution execution =
-            new WorkflowExecution(
-                workflow,
-                payload,
-                idempotencyKey
-            );
-
+        new WorkflowExecution(
+            workflow,
+            payload,
+            idempotencyKey
+        );
+    
         WorkflowExecution saved =
             executionRepository.save(execution);
-
+        
+        // New: create an outbox event in the same transaction.
+        outboxRepository.save(
+            new ExecutionOutboxEvent(saved)
+        );
+        
         return new WebhookTriggerResult(
             WorkflowExecutionResponse.from(saved),
             false

@@ -1,9 +1,11 @@
 package com.karimmajed.flowforge.service;
 
 import com.karimmajed.flowforge.dto.WebhookTriggerResult;
+import com.karimmajed.flowforge.entity.ExecutionOutboxEvent;
 import com.karimmajed.flowforge.entity.Workflow;
 import com.karimmajed.flowforge.entity.WorkflowExecution;
 import com.karimmajed.flowforge.enums.ExecutionStatus;
+import com.karimmajed.flowforge.repository.ExecutionOutboxRepository;
 import com.karimmajed.flowforge.repository.WorkflowExecutionRepository;
 import com.karimmajed.flowforge.repository.WorkflowRepository;
 
@@ -39,6 +41,9 @@ class WebhookServiceTest {
 
     @Mock
     private WebhookTokenService tokenService;
+
+    @Mock
+    private ExecutionOutboxRepository outboxRepository;
 
     @InjectMocks
     private WebhookService service;
@@ -92,6 +97,11 @@ class WebhookServiceTest {
                     .equals("order-123")
                 && execution.getPayload().equals(payload)
         ));
+        verify(outboxRepository).save(argThat(
+            (ExecutionOutboxEvent event) ->
+                event.getExecution().getId().equals(21L)
+                && event.getPublishedAt() == null
+        ));
     }
 
     @Test
@@ -121,6 +131,7 @@ class WebhookServiceTest {
         assertThat(result.response().id()).isEqualTo(21L);
 
         verify(executionRepository, never()).save(any());
+        verify(outboxRepository, never()).save(any());
     }
 
     @Test
@@ -154,6 +165,7 @@ class WebhookServiceTest {
             .isEqualTo(HttpStatus.CONFLICT);
 
         verify(executionRepository, never()).save(any());
+        verify(outboxRepository, never()).save(any());
     }
 
     @Test
@@ -181,6 +193,7 @@ class WebhookServiceTest {
             .isEqualTo(HttpStatus.NOT_FOUND);
 
         verifyNoInteractions(executionRepository);
+        verifyNoInteractions(outboxRepository);
     }
 
     private Workflow makeWorkflow() {
