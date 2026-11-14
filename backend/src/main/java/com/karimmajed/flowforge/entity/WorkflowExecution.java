@@ -89,4 +89,14 @@ public class WorkflowExecution {
     public OffsetDateTime getCreatedAt() {
         return createdAt;
     }
+
+    public void markQueued() {
+        if (status != ExecutionStatus.RECEIVED) {
+            throw new IllegalStateException(
+                "Only RECEIVED executions can become QUEUED"
+            );
+        }
+    
+        this.status = ExecutionStatus.QUEUED;
+    }
 }
