@@ -9,6 +9,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -21,7 +22,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class StepConfigurationValidatorTest {
 
-    private final StepConfigurationValidator validator = new StepConfigurationValidator();
+    private final StepConfigurationValidator validator =
+            new StepConfigurationValidator(host -> new InetAddress[] {
+                    InetAddress.getByName("8.8.8.8")
+            });
 
     @Test
     void acceptsValidateFields() {
