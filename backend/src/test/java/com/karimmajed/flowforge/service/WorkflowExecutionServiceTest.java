@@ -67,6 +67,24 @@ class WorkflowExecutionServiceTest {
         assertThat(response.status()).isEqualTo(ExecutionStatus.RECEIVED);
         assertThat(response.createdAt())
                 .isEqualTo(OffsetDateTime.parse("2026-11-13T17:02:00Z"));
+        assertThat(response.failureReason()).isNull();
+    }
+
+    @Test
+    void getById_returnsTheFailureReason() {
+        WorkflowExecution execution = execution(21L);
+        execution.markQueued();
+        execution.markRunning();
+        execution.markFailed("Missing required field: customerId");
+
+        when(executionRepository.findById(21L))
+                .thenReturn(Optional.of(execution));
+
+        WorkflowExecutionResponse response = service.getById(21L);
+
+        assertThat(response.status()).isEqualTo(ExecutionStatus.FAILED);
+        assertThat(response.failureReason())
+                .isEqualTo("Missing required field: customerId");
     }
 
     @Test
