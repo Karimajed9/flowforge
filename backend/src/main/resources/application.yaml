@@ -1,12 +1,18 @@
+server:
+  address: 127.0.0.1
+  port: 8080
 
 spring:
   application:
     name: flowforge
 
+  config:
+    import: optional:file:../.env[.properties]
+
   datasource:
-    url: jdbc:postgresql://localhost:5433/flowforge
-    username: flowforge
-    password: flowforge_dev
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/flowforge}
+    username: ${DB_USERNAME:flowforge}
+    password: ${DB_PASSWORD}
 
   jpa:
     hibernate:
@@ -15,8 +21,8 @@ spring:
   rabbitmq:
     host: localhost
     port: 5672
-    username: flowforge
-    password: flowforge_dev
+    username: ${RABBITMQ_USERNAME}
+    password: ${RABBITMQ_PASSWORD}
 
 management:
   endpoints:

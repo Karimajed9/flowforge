@@ -1,11 +1,14 @@
 package com.karimmajed.flowforge.controller;
 
+import com.karimmajed.flowforge.dto.WebhookTriggerResult;
 import com.karimmajed.flowforge.dto.WorkflowExecutionResponse;
 import com.karimmajed.flowforge.enums.ExecutionStatus;
 import com.karimmajed.flowforge.service.WebhookService;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.HttpStatus;
@@ -17,15 +20,11 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.OffsetDateTime;
 import java.util.Map;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(WebhookController.class)
 class WebhookControllerTest {
@@ -36,52 +35,183 @@ class WebhookControllerTest {
     @MockitoBean
     private WebhookService service;
 
-    @Test
-    void trigger_returnsCreatedExecution() throws Exception {
-        when(service.trigger(eq("abc_token-1"), any())).thenReturn(new WorkflowExecutionResponse(
-                21L,
-                7L,
-                ExecutionStatus.RECEIVED,
-                OffsetDateTime.parse("2026-11-13T17:02:00Z")));
-
-        mockMvc.perform(post("/api/webhooks/{token}", "abc_token-1")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"email\":\"a@b.c\"}"))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.id").value(21))
-                .andExpect(jsonPath("$.workflowId").value(7))
-                .andExpect(jsonPath("$.status").value("RECEIVED"))
-                .andExpect(jsonPath("$.createdAt").value("2026-11-13T17:02:00Z"));
-
-        @SuppressWarnings("unchecked")
-        org.mockito.ArgumentCaptor<Map<String, Object>> payload =
-                org.mockito.ArgumentCaptor.forClass(Map.class);
-        verify(service).trigger(eq("abc_token-1"), payload.capture());
-        assertThat(payload.getValue()).containsEntry("email", "a@b.c");
+    private WorkflowExecutionResponse exampleResponse() {
+        return new WorkflowExecutionResponse(
+            21L,
+            7L,
+            ExecutionStatus.RECEIVED,
+            OffsetDateTime.parse("2026-11-13T17:02:00Z")
+        );
     }
 
     @Test
-    void trigger_unknownToken_isNotFound() throws Exception {
-        when(service.trigger(eq("missing"), any())).thenThrow(new ResponseStatusException(
-                HttpStatus.NOT_FOUND,
-                "Webhook not found"));
+    void newWebhookReturns201() throws Exception {
 
-        mockMvc.perform(post("/api/webhooks/{token}", "missing")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
-                .andExpect(status().isNotFound());
+        when(service.trigger(
+            eq("valid-token"),
+            eq("order-123"),
+            anyMap()
+        )).thenReturn(new WebhookTriggerResult(
+            exampleResponse(),
+            false
+        ));
 
-        verify(service).trigger(eq("missing"), any());
+        mockMvc.perform(post("/api/webhooks")
+                .header("X-Webhook-Token", "valid-token")
+                .header("Idempotency-Key", "order-123")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"amount\":150}"))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.id").value(21))
+            .andExpect(jsonPath("$.workflowId").value(7))
+            .andExpect(jsonPath("$.status").value("RECEIVED"));
+
+        verify(service).trigger(
+            eq("valid-token"),
+            eq("order-123"),
+            anyMap()
+        );
+    }
+
+    @Test
+    void replayReturns200() throws Exception {
+
+        when(service.trigger(
+            eq("valid-token"),
+            eq("order-123"),
+            anyMap()
+        )).thenReturn(new WebhookTriggerResult(
+            exampleResponse(),
+            true
+        ));
+
+        mockMvc.perform(post("/api/webhooks")
+                .header("X-Webhook-Token", "valid-token")
+                .header("Idempotency-Key", "order-123")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"amount\":150}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(21));
+    }
+
+    @Test
+    void missingTokenReturns404() throws Exception {
+
+        mockMvc.perform(post("/api/webhooks")
+                .header("Idempotency-Key", "order-123")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+            .andExpect(status().isNotFound());
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void missingIdempotencyKeyReturns400() throws Exception {
+
+        mockMvc.perform(post("/api/webhooks")
+                .header("X-Webhook-Token", "valid-token")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+            .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void malformedJsonReturns400() throws Exception {
+
+        mockMvc.perform(post("/api/webhooks")
+                .header("X-Webhook-Token", "valid-token")
+                .header("Idempotency-Key", "order-123")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{invalid-json"))
+            .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(service);
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"", "not-json"})
-    void trigger_rejectsUnreadableBody(String body) throws Exception {
-        mockMvc.perform(post("/api/webhooks/{token}", "abc_token-1")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body))
-                .andExpect(status().isBadRequest());
+    @ValueSource(strings = {
+        "[1,2,3]",
+        "\"hello\"",
+        "123",
+        "true",
+        "null"
+    })
+    void nonObjectJsonReturns400(String body) throws Exception {
+
+        mockMvc.perform(post("/api/webhooks")
+                .header("X-Webhook-Token", "valid-token")
+                .header("Idempotency-Key", "order-123")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isBadRequest());
 
         verifyNoInteractions(service);
+    }
+
+    @Test
+    void oversizedPayloadReturns413() throws Exception {
+
+        String largePayload =
+            "{\"data\":\"" + "a".repeat(65536) + "\"}";
+
+        mockMvc.perform(post("/api/webhooks")
+                .header("X-Webhook-Token", "valid-token")
+                .header("Idempotency-Key", "order-123")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(largePayload))
+            .andExpect(status().is(413));
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void differentPayloadWithSameKeyReturns409() throws Exception {
+
+        when(service.trigger(
+            eq("valid-token"),
+            eq("order-123"),
+            anyMap()
+        )).thenThrow(new ResponseStatusException(
+            HttpStatus.CONFLICT,
+            "Idempotency key was already used with a different payload"
+        ));
+
+        mockMvc.perform(post("/api/webhooks")
+                .header("X-Webhook-Token", "valid-token")
+                .header("Idempotency-Key", "order-123")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"amount\":200}"))
+            .andExpect(status().isConflict());
+    }
+
+    @Test
+    void validJsonObjectPassesThrough() throws Exception {
+
+        when(service.trigger(
+            eq("valid-token"),
+            eq("order-123"),
+            anyMap()
+        )).thenReturn(new WebhookTriggerResult(
+            exampleResponse(),
+            false
+        ));
+
+        mockMvc.perform(post("/api/webhooks")
+                .header("X-Webhook-Token", "valid-token")
+                .header("Idempotency-Key", "order-123")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"amountt\":150}"))
+            .andExpect(status().isCreated());
+
+        verify(service).trigger(
+            eq("valid-token"),
+            eq("order-123"),
+            argThat(payload ->
+                Integer.valueOf(150).equals(payload.get("amountt"))
+            )
+        );
     }
 }

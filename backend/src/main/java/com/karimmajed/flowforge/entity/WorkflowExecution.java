@@ -1,5 +1,7 @@
 package com.karimmajed.flowforge.entity;
 
+import com.karimmajed.flowforge.enums.ExecutionStatus;
+
 import jakarta.persistence.*;
 
 import org.hibernate.annotations.JdbcTypeCode;
@@ -8,8 +10,6 @@ import org.hibernate.type.SqlTypes;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Map;
-
-import com.karimmajed.flowforge.enums.ExecutionStatus;
 
 @Entity
 @Table(name = "workflow_executions")
@@ -31,7 +31,18 @@ public class WorkflowExecution {
     @Column(columnDefinition = "jsonb", nullable = false)
     private Map<String, Object> payload;
 
-    @Column(name = "created_at", nullable = false, updatable = false)
+    @Column(
+        name = "idempotency_key",
+        nullable = false,
+        length = 128
+    )
+    private String idempotencyKey;
+
+    @Column(
+        name = "created_at",
+        nullable = false,
+        updatable = false
+    )
     private OffsetDateTime createdAt;
 
     protected WorkflowExecution() {
@@ -39,10 +50,12 @@ public class WorkflowExecution {
 
     public WorkflowExecution(
             Workflow workflow,
-            Map<String, Object> payload) {
+            Map<String, Object> payload,
+            String idempotencyKey) {
 
         this.workflow = workflow;
         this.payload = payload;
+        this.idempotencyKey = idempotencyKey;
         this.status = ExecutionStatus.RECEIVED;
     }
 
@@ -63,6 +76,14 @@ public class WorkflowExecution {
 
     public ExecutionStatus getStatus() {
         return status;
+    }
+
+    public Map<String, Object> getPayload() {
+        return payload;
+    }
+
+    public String getIdempotencyKey() {
+        return idempotencyKey;
     }
 
     public OffsetDateTime getCreatedAt() {
