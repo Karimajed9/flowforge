@@ -171,12 +171,18 @@ class WorkflowExecutionProcessorTest {
     }
 
     @Test
-    void unknownExecutionIsIgnored() {
+    void unknownExecutionIsRejected() {
 
         when(executionRepository.findForProcessing(21L))
             .thenReturn(Optional.empty());
 
-        processor.process(21L);
+        IllegalStateException ex = assertThrows(
+            IllegalStateException.class,
+            () -> processor.process(21L)
+        );
+
+        assertThat(ex.getMessage())
+            .isEqualTo("Execution not found: 21");
 
         verifyNoInteractions(stepRepository);
     }
