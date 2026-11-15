@@ -21,6 +21,21 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
 
+  rabbitmq-setup:
+    image: curlimages/curl:8.16.0
+    depends_on:
+      rabbitmq:
+        condition: service_started
+    environment:
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:?RABBITMQ_USERNAME is required}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+    volumes:
+      - ./rabbitmq/configure.sh:/scripts/configure.sh:ro
+    entrypoint:
+      - /bin/sh
+      - /scripts/configure.sh
+    restart: "no"
+
 volumes:
   postgres_data:
   rabbitmq_data:
