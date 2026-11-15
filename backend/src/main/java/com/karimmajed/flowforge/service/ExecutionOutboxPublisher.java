@@ -82,7 +82,7 @@ public class ExecutionOutboxPublisher {
                     .getFuture()
                     .get(5, TimeUnit.SECONDS);
 
-                if (!confirmation.isAck()) {
+                if (!confirmation.ack()) {
                     log.warn(
                         "RabbitMQ did not confirm execution {}",
                         event.executionId()
