@@ -5,6 +5,7 @@ import com.karimmajed.flowforge.entity.WorkflowExecution;
 import com.karimmajed.flowforge.entity.WorkflowStep;
 import com.karimmajed.flowforge.enums.ExecutionStatus;
 import com.karimmajed.flowforge.enums.StepType;
+import com.karimmajed.flowforge.exception.NonRetryableExecutionException;
 import com.karimmajed.flowforge.repository.WorkflowExecutionRepository;
 import com.karimmajed.flowforge.repository.WorkflowStepRepository;
 
@@ -176,8 +177,8 @@ class WorkflowExecutionProcessorTest {
         when(executionRepository.findForProcessing(21L))
             .thenReturn(Optional.empty());
 
-        IllegalStateException ex = assertThrows(
-            IllegalStateException.class,
+        NonRetryableExecutionException ex = assertThrows(
+            NonRetryableExecutionException.class,
             () -> processor.process(21L)
         );
 

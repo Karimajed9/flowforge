@@ -13,13 +13,17 @@ class RabbitMqConfigTest {
     private final RabbitMqConfig config = new RabbitMqConfig();
 
     @Test
-    void executionQueueIsDurableAndHasNoDeadLetterExchange() {
+    void executionQueueLeavesDeadLetteringToTheBrokerPolicy() {
         Queue queue = config.executionQueue();
 
         assertThat(queue.getName()).isEqualTo(RabbitMqConfig.QUEUE);
         assertThat(queue.isDurable()).isTrue();
+        // Broker policy flowforge-dlx supplies the dead-letter exchange
+        // and routing key. The Java declaration must not hardcode them.
         assertThat(queue.getArguments())
-                .doesNotContainKey("x-dead-letter-exchange");
+                .doesNotContainKeys(
+                        "x-dead-letter-exchange",
+                        "x-dead-letter-routing-key");
     }
 
     @Test

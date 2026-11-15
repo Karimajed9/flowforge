@@ -6,6 +6,7 @@ import com.karimmajed.flowforge.enums.ExecutionStatus;
 import com.karimmajed.flowforge.enums.StepType;
 import com.karimmajed.flowforge.repository.WorkflowExecutionRepository;
 import com.karimmajed.flowforge.repository.WorkflowStepRepository;
+import com.karimmajed.flowforge.exception.NonRetryableExecutionException;
 
 import org.slf4j.Logger;        
 import org.slf4j.LoggerFactory;
@@ -42,7 +43,7 @@ public class WorkflowExecutionProcessor {
             .orElse(null);
 
             if (execution == null) {
-                throw new IllegalStateException(
+                throw new NonRetryableExecutionException(
                     "Execution not found: " + executionId
                 );
             }
