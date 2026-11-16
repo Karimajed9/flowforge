@@ -69,4 +69,22 @@ class RabbitListenerRetryConfigTest {
             )
         )).isTrue();
     }
+
+    @Test
+    void runningCheckpointDeliveryIsNotRetried() {
+
+        RetryPolicySettings settings =
+            new RetryPolicySettings();
+
+        config.rabbitListenerRetrySettingsCustomizer()
+            .customize(settings);
+
+        var policy = settings.createRetryPolicy();
+
+        assertThat(policy.shouldRetry(
+            new NonRetryableExecutionException(
+                "Unexpected RUNNING execution: 21"
+            )
+        )).isFalse();
+    }
 }

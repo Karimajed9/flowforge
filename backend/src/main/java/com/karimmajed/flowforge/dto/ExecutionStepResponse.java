@@ -5,6 +5,10 @@ import com.karimmajed.flowforge.enums.StepType;
 
 import java.time.OffsetDateTime;
 
+/**
+ * Step history for one execution. {@code leaseUntil} is informational.
+ * A past timestamp does not prove the worker has stopped.
+ */
 public record ExecutionStepResponse(
         Long stepId,
         String name,
@@ -14,5 +18,6 @@ public record ExecutionStepResponse(
         Integer attemptNumber,
         String failureReason,
         OffsetDateTime startedAt,
-        OffsetDateTime updatedAt
+        OffsetDateTime updatedAt,
+        OffsetDateTime leaseUntil
 ) {}

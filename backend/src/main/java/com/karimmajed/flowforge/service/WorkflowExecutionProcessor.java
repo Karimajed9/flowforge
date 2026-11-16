@@ -75,7 +75,7 @@ public class WorkflowExecutionProcessor {
                     return;
                 }
 
-                case BUSY -> throw new IllegalStateException(
+                case BUSY -> throw new NonRetryableExecutionException(
                         "Unexpected RUNNING execution: " + executionId);
 
                 case STEP -> {

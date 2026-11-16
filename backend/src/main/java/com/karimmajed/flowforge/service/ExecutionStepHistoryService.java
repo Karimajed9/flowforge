@@ -46,7 +46,8 @@ public class ExecutionStepHistoryService {
                        c.attempt_number,
                        c.failure_reason,
                        c.created_at,
-                       c.updated_at
+                       c.updated_at,
+                       c.lease_until
                 FROM workflow_executions e
                 JOIN workflow_steps s
                   ON s.workflow_id = e.workflow_id
@@ -73,6 +74,7 @@ public class ExecutionStepHistoryService {
                     null,
                     null,
                     null,
+                    null,
                     null);
         }
 
@@ -85,6 +87,7 @@ public class ExecutionStepHistoryService {
                 rs.getObject("attempt_number", Integer.class),
                 rs.getString("failure_reason"),
                 rs.getObject("created_at", OffsetDateTime.class),
-                rs.getObject("updated_at", OffsetDateTime.class));
+                rs.getObject("updated_at", OffsetDateTime.class),
+                rs.getObject("lease_until", OffsetDateTime.class));
     }
 }

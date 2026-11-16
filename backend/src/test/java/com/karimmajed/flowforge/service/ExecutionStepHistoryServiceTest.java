@@ -55,6 +55,7 @@ class ExecutionStepHistoryServiceTest {
         assertThat(response.failureReason()).isNull();
         assertThat(response.startedAt()).isNull();
         assertThat(response.updatedAt()).isNull();
+        assertThat(response.leaseUntil()).isNull();
         verify(row, never()).getString("attempt_token");
         verify(row, never()).getString("configuration");
     }
@@ -62,11 +63,13 @@ class ExecutionStepHistoryServiceTest {
     @Test
     void runningCheckpointKeepsTheAttemptAndStartTime() throws Exception {
         OffsetDateTime started = OffsetDateTime.parse("2026-11-15T18:00:00Z");
+        OffsetDateTime lease = OffsetDateTime.parse("2026-11-15T18:02:00Z");
         stubStep("RUNNING");
         when(row.getObject("attempt_number", Integer.class)).thenReturn(1);
         when(row.getString("failure_reason")).thenReturn(null);
         when(row.getObject("created_at", OffsetDateTime.class)).thenReturn(started);
         when(row.getObject("updated_at", OffsetDateTime.class)).thenReturn(started);
+        when(row.getObject("lease_until", OffsetDateTime.class)).thenReturn(lease);
 
         ExecutionStepResponse response = ExecutionStepHistoryService.mapRow(row);
 
@@ -75,6 +78,7 @@ class ExecutionStepHistoryServiceTest {
         assertThat(response.failureReason()).isNull();
         assertThat(response.startedAt()).isEqualTo(started);
         assertThat(response.updatedAt()).isEqualTo(started);
+        assertThat(response.leaseUntil()).isEqualTo(lease);
     }
 
     @Test

@@ -153,7 +153,8 @@ class WorkflowExecutionControllerTest {
                         1,
                         null,
                         OffsetDateTime.parse("2026-11-15T18:00:00Z"),
-                        OffsetDateTime.parse("2026-11-15T18:00:01Z")),
+                        OffsetDateTime.parse("2026-11-15T18:00:01Z"),
+                        null),
                 new ExecutionStepResponse(
                         8L,
                         "Notify",
@@ -163,13 +164,15 @@ class WorkflowExecutionControllerTest {
                         1,
                         "HTTP status 404",
                         OffsetDateTime.parse("2026-11-15T18:00:01Z"),
-                        OffsetDateTime.parse("2026-11-15T18:00:02Z")),
+                        OffsetDateTime.parse("2026-11-15T18:00:02Z"),
+                        null),
                 new ExecutionStepResponse(
                         9L,
                         "Customer",
                         StepType.VALIDATE_FIELDS,
                         3,
                         ExecutionStepStatus.NOT_STARTED,
+                        null,
                         null,
                         null,
                         null,
@@ -184,6 +187,9 @@ class WorkflowExecutionControllerTest {
                 .andExpect(jsonPath("$[0].status").value("SUCCEEDED"))
                 .andExpect(jsonPath("$[0].attemptNumber").value(1))
                 .andExpect(jsonPath("$[0].failureReason").value(nullValue()))
+                .andExpect(jsonPath("$[0].leaseUntil").value(nullValue()))
+                .andExpect(jsonPath("$[1].leaseUntil").value(nullValue()))
+                .andExpect(jsonPath("$[2].leaseUntil").value(nullValue()))
                 .andExpect(jsonPath("$[1].status").value("FAILED"))
                 .andExpect(jsonPath("$[1].failureReason").value("HTTP status 404"))
                 .andExpect(jsonPath("$[2].status").value("NOT_STARTED"))

@@ -127,6 +127,7 @@ class ExecutionStepHistoryIntegrationTest {
         assertThat(steps.get(2).failureReason()).isNull();
         assertThat(steps.get(2).startedAt()).isNull();
         assertThat(steps.get(2).updatedAt()).isNull();
+        assertThat(steps.get(2).leaseUntil()).isNull();
         assertThat(rendered(steps)).doesNotContain(ATTEMPT_TOKEN, SECRET_URL);
     }
 
@@ -149,6 +150,25 @@ class ExecutionStepHistoryIntegrationTest {
         assertThat(steps.get(1).failureReason()).isNull();
         assertThat(steps.get(1).startedAt().toInstant()).isEqualTo(STARTED.toInstant());
         assertThat(steps.get(1).updatedAt().toInstant()).isEqualTo(STARTED.toInstant());
+        OffsetDateTime lease = jdbc.queryForObject("""
+                SELECT lease_until
+                FROM execution_step_checkpoints
+                WHERE execution_id = ?
+                  AND workflow_step_id = ?
+                """,
+                OffsetDateTime.class,
+                executionId,
+                second);
+        assertThat(steps.get(1).leaseUntil().toInstant()).isEqualTo(lease.toInstant());
+        jdbc.update("""
+                UPDATE execution_step_checkpoints
+                SET lease_until = NULL
+                WHERE execution_id = ?
+                  AND workflow_step_id = ?
+                """,
+                executionId,
+                first);
+        assertThat(history.getSteps(executionId).get(0).leaseUntil()).isNull();
         assertUnchanged(executionId, "RUNNING");
         assertThat(checkpointStatus(executionId, second)).isEqualTo("RUNNING");
     }

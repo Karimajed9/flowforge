@@ -53,7 +53,7 @@ class WorkflowStepServiceTest {
     void create_savesValidatedStepAndReturnsIt() {
         Workflow workflow = new Workflow("Onboarding", "New hire");
         Map<String, Object> configuration = Map.of(
-                "method", "POST",
+                "method", "GET",
                 "url", "https://example.com/hook");
         CreateWorkflowStepRequest request = new CreateWorkflowStepRequest(
                 "Notify",

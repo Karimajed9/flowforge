@@ -141,12 +141,13 @@ class WorkflowExecutionProcessorTest {
     void runningExecutionIsRejected() {
         when(store.claimNext(21L)).thenReturn(Claim.busy());
 
-        IllegalStateException ex = assertThrows(
-                IllegalStateException.class,
+        NonRetryableExecutionException ex = assertThrows(
+                NonRetryableExecutionException.class,
                 () -> processor.process(21L));
 
         assertThat(ex.getMessage()).isEqualTo("Unexpected RUNNING execution: 21");
         verify(store, never()).complete(org.mockito.ArgumentMatchers.any());
+        verify(httpGet, never()).get(org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test

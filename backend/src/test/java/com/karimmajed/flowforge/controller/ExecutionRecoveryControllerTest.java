@@ -1,5 +1,6 @@
 package com.karimmajed.flowforge.controller;
 
+import com.karimmajed.flowforge.service.ExecutionAbandonmentService;
 import com.karimmajed.flowforge.service.ExecutionRecoveryService;
 
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,8 @@ import org.springframework.web.server.ResponseStatusException;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -32,6 +35,9 @@ class ExecutionRecoveryControllerTest {
 
     @MockitoBean
     private ExecutionRecoveryService service;
+
+    @MockitoBean
+    private ExecutionAbandonmentService abandonment;
 
     @Test
     void matchingKeyQueuesRecovery() throws Exception {
@@ -80,6 +86,41 @@ class ExecutionRecoveryControllerTest {
                         .header("X-Recovery-Key", "test-recovery-key"))
                 .andExpect(status().isBadRequest());
 
+        verifyNoInteractions(service, abandonment);
+    }
+
+    @Test
+    void matchingKeyAbandonsTheRunningStep() throws Exception {
+        when(abandonment.abandon(21L, 8L, 1, "worker process is gone"))
+                .thenReturn(new ExecutionAbandonmentService.Result(21L, 8L, 1));
+
+        mockMvc.perform(post("/api/admin/executions/{id}/steps/{stepId}/abandon", 21, 8)
+                        .header("X-Recovery-Key", "test-recovery-key")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {"attemptNumber":1,"reason":"worker process is gone"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.executionId").value(21))
+                .andExpect(jsonPath("$.stepId").value(8))
+                .andExpect(jsonPath("$.attemptNumber").value(1))
+                .andExpect(jsonPath("$.message").value(
+                        "Step abandoned. The external outcome may be unknown. "
+                                + "Confirm the worker is no longer active before abandoning."));
+
+        verify(abandonment).abandon(21L, 8L, 1, "worker process is gone");
         verifyNoInteractions(service);
+    }
+
+    @Test
+    void abandonWithoutAKeyIsForbidden() throws Exception {
+        mockMvc.perform(post("/api/admin/executions/{id}/steps/{stepId}/abandon", 21, 8)
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {"attemptNumber":1,"reason":"worker process is gone"}
+                                """))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(service, abandonment);
     }
 }

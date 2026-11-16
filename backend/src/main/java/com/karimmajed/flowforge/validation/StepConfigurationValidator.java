@@ -86,8 +86,8 @@ public class StepConfigurationValidator {
         Object url = config.get("url");
 
         if (!(method instanceof String httpMethod)
-                || !Set.of("GET", "POST").contains(httpMethod)) {
-            throw badRequest("Method must be GET or POST");
+                || !"GET".equals(httpMethod)) {
+            throw badRequest("Method must be GET");
         }
 
         if (!(url instanceof String urlString)

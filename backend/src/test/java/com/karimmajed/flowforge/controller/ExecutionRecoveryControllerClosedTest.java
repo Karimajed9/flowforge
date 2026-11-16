@@ -24,4 +24,15 @@ class ExecutionRecoveryControllerClosedTest {
                         .header("X-Recovery-Key", "test-recovery-key"))
                 .andExpect(status().isNotFound());
     }
+
+    @Test
+    void abandonRouteIsAbsentWhenDisabled() throws Exception {
+        mockMvc.perform(post("/api/admin/executions/{id}/steps/{stepId}/abandon", 21, 8)
+                        .header("X-Recovery-Key", "test-recovery-key")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"attemptNumber":1,"reason":"worker process is gone"}
+                                """))
+                .andExpect(status().isNotFound());
+    }
 }

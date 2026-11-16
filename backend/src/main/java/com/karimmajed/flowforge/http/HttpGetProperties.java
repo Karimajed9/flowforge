@@ -46,8 +46,20 @@ public class HttpGetProperties {
     }
 
     public void setAllowedHosts(List<String> allowedHosts) {
-        this.allowedHosts = allowedHosts == null
+        List<String> copy = allowedHosts == null
                 ? new ArrayList<>()
                 : new ArrayList<>(allowedHosts);
+
+        for (String host : copy) {
+            if (host == null
+                    || host.isBlank()
+                    || "*".equals(host)
+                    || "all".equalsIgnoreCase(host)) {
+                throw new IllegalArgumentException(
+                        "HTTP GET allowlist has no allow-all value");
+            }
+        }
+
+        this.allowedHosts = copy;
     }
 }

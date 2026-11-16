@@ -1,5 +1,6 @@
 package com.karimmajed.flowforge.service;
 
+import com.karimmajed.flowforge.exception.NonRetryableExecutionException;
 import com.karimmajed.flowforge.http.HttpGetProperties;
 import com.karimmajed.flowforge.http.HttpsGetExecutor;
 import com.karimmajed.flowforge.repository.OutboxDeliveryStore;
@@ -288,8 +289,8 @@ class WorkflowExecutionCheckpointIntegrationTest {
                 """,
                 executionId);
         processor.setOnStepStart(null);
-        IllegalStateException redelivery = assertThrows(
-                IllegalStateException.class,
+        NonRetryableExecutionException redelivery = assertThrows(
+                NonRetryableExecutionException.class,
                 () -> processor.process(executionId));
 
         assertThat(redelivery.getMessage())
@@ -585,8 +586,8 @@ class WorkflowExecutionCheckpointIntegrationTest {
                 executionId);
         transport.fail(new IllegalStateException("must not send again"));
 
-        IllegalStateException redelivery = assertThrows(
-                IllegalStateException.class,
+        NonRetryableExecutionException redelivery = assertThrows(
+                NonRetryableExecutionException.class,
                 () -> processor.process(executionId));
 
         assertThat(redelivery.getMessage())
@@ -631,8 +632,8 @@ class WorkflowExecutionCheckpointIntegrationTest {
         assertThat(checkpoints(executionId)).containsExactly(
                 new SavedCheckpoint(httpId, "RUNNING", 1, null));
 
-        IllegalStateException redelivery = assertThrows(
-                IllegalStateException.class,
+        NonRetryableExecutionException redelivery = assertThrows(
+                NonRetryableExecutionException.class,
                 () -> processor.process(executionId));
 
         assertThat(redelivery.getMessage())
@@ -682,7 +683,7 @@ class WorkflowExecutionCheckpointIntegrationTest {
         try {
             processor.process(executionId);
             return "ok";
-        } catch (IllegalStateException ex) {
+        } catch (NonRetryableExecutionException | IllegalStateException ex) {
             return "409 " + ex.getMessage();
         }
     }

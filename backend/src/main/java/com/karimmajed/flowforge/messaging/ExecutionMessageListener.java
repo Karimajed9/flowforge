@@ -13,6 +13,8 @@ import org.springframework.stereotype.Component;
 @Component
 public class ExecutionMessageListener {
 
+    public static final String LISTENER_ID = "executionConsumer";
+
     private static final Logger log =
         LoggerFactory.getLogger(
             ExecutionMessageListener.class
@@ -26,8 +28,9 @@ public class ExecutionMessageListener {
     }
 
     @RabbitListener(
+        id = LISTENER_ID,
         queues = RabbitMqConfig.QUEUE,
-        autoStartup = "${flowforge.consumer.enabled:false}"
+        autoStartup = "false"
     )
     public void receive(String messageBody) {
 

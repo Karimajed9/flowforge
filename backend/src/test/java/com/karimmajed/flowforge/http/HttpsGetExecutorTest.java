@@ -15,6 +15,8 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.io.OutputStream;
 import java.lang.reflect.Field;
 import java.net.InetAddress;
@@ -272,10 +274,39 @@ class HttpsGetExecutorTest {
         assertThat(client.connectTimeout()).contains(Duration.ofSeconds(2));
         assertThat(readTimeout(factory)).isEqualTo(Duration.ofSeconds(5));
         assertThat(properties.getAllowedHosts()).isEmpty();
+        String yaml = Files.readString(Path.of("src/main/resources/application.yaml"));
+        assertThat(yaml).contains("allowed-hosts: []");
+        assertThat(yaml).doesNotContain("httpbin.org");
         assertThat(properties.getConnectTimeout()
                 .plus(properties.getConnectTimeout())
                 .plus(properties.getRequestTimeout()))
                 .isLessThan(com.karimmajed.flowforge.service.ExecutionCheckpointStore.LEASE);
+    }
+
+    @Test
+    void allowlistHasNoAllowAllValue() {
+        HttpGetProperties properties = new HttpGetProperties();
+
+        assertThatThrownBy(() -> properties.setAllowedHosts(List.of("*")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> properties.setAllowedHosts(List.of("all")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(properties.getAllowedHosts()).isEmpty();
+    }
+
+    @Test
+    void explicitHostIsAllowedOnlyWhenNamed() throws Exception {
+        ScriptedTransport transport = new ScriptedTransport();
+        transport.respond(200, new byte[0]);
+        HttpsGetExecutor executor = executor(
+                List.of("httpbin.org"),
+                transport,
+                publicOnly("httpbin.org"));
+
+        assertThat(executor.get("https://httpbin.org/get").outcome())
+                .isEqualTo(HttpGetResult.Outcome.SUCCESS);
+        assertThat(executor.get("https://example.com/get").outcome())
+                .isEqualTo(HttpGetResult.Outcome.BLOCKED);
     }
 
     @Test
