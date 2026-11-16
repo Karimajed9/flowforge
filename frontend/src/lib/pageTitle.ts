@@ -5,6 +5,9 @@ export function pageTitle(pathname: string): string {
   if (pathname === '/workflows') {
     return 'Workflows'
   }
+  if (/^\/workflows\/[^/]+$/.test(pathname)) {
+    return 'Workflow'
+  }
   if (pathname === '/executions') {
     return 'Executions'
   }

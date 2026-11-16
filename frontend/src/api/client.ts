@@ -5,6 +5,7 @@ import {
   parseStepList,
   parseWorkflow,
   parseWorkflowList,
+  parseWorkflowStep,
   parseWorkflowSteps,
 } from './parse.ts'
 import type { PageResponse, WorkflowExecution } from '../types/execution.ts'
@@ -21,6 +22,11 @@ export interface ExecutionDetails {
 export interface WorkflowHistory {
   workflow: Workflow
   executions: PageResponse<WorkflowExecution>
+}
+
+export interface WorkflowDetail {
+  workflow: Workflow
+  steps: WorkflowStep[]
 }
 
 function apiUrl(path: string): string {
@@ -42,26 +48,66 @@ async function readBody(response: Response): Promise<
   }
 }
 
-function problemMessage(value: unknown, status: number): string {
-  if (value && typeof value === 'object') {
-    const record = value as { detail?: unknown; message?: unknown }
-    if (typeof record.detail === 'string' && record.detail.length > 0) {
-      return record.detail
-    }
-    if (typeof record.message === 'string' && record.message.length > 0) {
-      return record.message
-    }
-  }
-  return `Request failed (${status})`
+function textMessage(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null
 }
 
-async function request(path: string, signal?: AbortSignal): Promise<unknown> {
+function problemMessage(value: unknown, status: number): string {
+  if (!value || typeof value !== 'object') {
+    return `Request failed (${status})`
+  }
+  const record = value as {
+    detail?: unknown
+    message?: unknown
+    errors?: unknown
+  }
+  const parts: string[] = []
+  const summary = textMessage(record.detail) ?? textMessage(record.message)
+  if (summary) {
+    parts.push(summary)
+  }
+  if (Array.isArray(record.errors)) {
+    for (const error of record.errors) {
+      if (typeof error === 'string' && error.length > 0) {
+        parts.push(error)
+        continue
+      }
+      if (error && typeof error === 'object') {
+        const item = error as {
+          defaultMessage?: unknown
+          message?: unknown
+          detail?: unknown
+        }
+        const text =
+          textMessage(item.defaultMessage) ??
+          textMessage(item.message) ??
+          textMessage(item.detail)
+        if (text) {
+          parts.push(text)
+        }
+      }
+    }
+  }
+  return parts.length > 0 ? parts.join(' ') : `Request failed (${status})`
+}
+
+async function request(
+  path: string,
+  signal?: AbortSignal,
+  method: 'GET' | 'POST' | 'PATCH' = 'GET',
+  payload?: unknown,
+): Promise<unknown> {
   let response: Response
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  if (payload !== undefined) {
+    headers['Content-Type'] = 'application/json'
+  }
 
   try {
     response = await fetch(apiUrl(path), {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
+      method,
+      headers,
+      body: payload === undefined ? undefined : JSON.stringify(payload),
       signal,
     })
   } catch (error) {
@@ -147,6 +193,52 @@ export async function loadExecutionDetails(
     getExecutionSteps(id, signal),
   ])
   return { execution, steps }
+}
+
+export function createWorkflow(
+  input: { name: string; description: string | null },
+  signal?: AbortSignal,
+): Promise<Workflow> {
+  return request('/api/workflows', signal, 'POST', input).then(parseWorkflow)
+}
+
+export function updateWorkflowStatus(
+  id: number,
+  active: boolean,
+  signal?: AbortSignal,
+): Promise<Workflow> {
+  return request(`/api/workflows/${id}/status`, signal, 'PATCH', { active }).then(
+    parseWorkflow,
+  )
+}
+
+export function createWorkflowStep(
+  workflowId: number,
+  input: {
+    name: string
+    stepType: WorkflowStep['stepType']
+    position: number
+    configuration: Record<string, unknown>
+  },
+  signal?: AbortSignal,
+): Promise<WorkflowStep> {
+  return request(
+    `/api/workflows/${workflowId}/steps`,
+    signal,
+    'POST',
+    input,
+  ).then(parseWorkflowStep)
+}
+
+export async function loadWorkflowDetail(
+  workflowId: number,
+  signal?: AbortSignal,
+): Promise<WorkflowDetail> {
+  const [workflow, steps] = await Promise.all([
+    getWorkflow(workflowId, signal),
+    listWorkflowSteps(workflowId, signal),
+  ])
+  return { workflow, steps }
 }
 
 export async function loadWorkflowHistory(

@@ -12,12 +12,11 @@ export function OverviewPage() {
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-6">
       <section className="rounded-2xl border border-line bg-navy-900 p-6 sm:p-8">
-        <p className="text-sm font-medium text-teal-300">Read-only dashboard</p>
+        <p className="text-sm font-medium text-teal-300">Dashboard</p>
         <h2 className="mt-2 text-2xl font-semibold">Workflow activity</h2>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-muted">
-          Review saved workflows and the executions recorded for each one.
-          This view lists data from the API. Creating, editing, recovery, and
-          abandonment stay outside this dashboard.
+          Review workflows, their steps, and the executions recorded for each
+          one. Recovery and abandonment stay outside this dashboard.
         </p>
         <div className="mt-6 flex flex-col gap-3 sm:flex-row">
           <Link
