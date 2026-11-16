@@ -66,4 +66,6 @@ flowforge:
     request-timeout: 5s
     max-response-bytes: 65536
     # Default deny. Add httpbin.org here only for an explicit local test.
-    allowed-hosts: []
+    allowed-hosts: [
+      httpbin.org
+    ]
