@@ -1,5 +1,6 @@
 package com.karimmajed.flowforge.controller;
 
+import com.karimmajed.flowforge.security.TestAccess;
 import com.karimmajed.flowforge.service.ExecutionAbandonmentService;
 import com.karimmajed.flowforge.service.ExecutionRecoveryService;
 
@@ -35,6 +36,7 @@ class ExecutionRecoveryControllerBlankTokenTest {
     @Test
     void blankConfiguredTokenIsForbidden() throws Exception {
         mockMvc.perform(post("/api/admin/executions/{id}/recover", 21)
+                        .with(TestAccess.admin())
                         .header("X-Recovery-Key", "test-recovery-key"))
                 .andExpect(status().isForbidden());
 

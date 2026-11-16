@@ -67,6 +67,15 @@ flowforge:
     enabled: ${FLOWFORGE_RECOVERY_ENABLED:false}
     token: ${FLOWFORGE_RECOVERY_TOKEN:}
 
+  security:
+    # Required. The process refuses to start when these are unset.
+    # Production verifies signatures against the issuer JWKS.
+    issuer-uri: ${FLOWFORGE_OIDC_ISSUER_URI}
+    audience: ${FLOWFORGE_OIDC_AUDIENCE}
+    # Empty in production. Tests set a classpath public key so they do not
+    # call an identity provider. Do not point this at a production key.
+    public-key-location: ${FLOWFORGE_OIDC_PUBLIC_KEY_LOCATION:}
+
   http-get:
     connect-timeout: 2s
     request-timeout: 5s
