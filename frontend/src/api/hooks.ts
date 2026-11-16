@@ -1,4 +1,6 @@
 import {
+  getDashboardOverview,
+  listRecentExecutions,
   listWorkflows,
   loadExecutionDetails,
   loadWorkflowDetail,
@@ -6,8 +8,18 @@ import {
 } from './client.ts'
 import { useLoad } from './useLoad.ts'
 
-export function useWorkflowList() {
-  return useLoad('workflows', listWorkflows)
+export function useWorkflowList(page: number) {
+  return useLoad(`workflows:${page}`, (signal) => listWorkflows(page, signal))
+}
+
+export function useDashboardOverview() {
+  return useLoad('dashboard-overview', getDashboardOverview)
+}
+
+export function useRecentExecutions(page: number) {
+  return useLoad(`recent-executions:${page}`, (signal) =>
+    listRecentExecutions(page, signal),
+  )
 }
 
 export function useExecutionDetails(executionId: number | null) {

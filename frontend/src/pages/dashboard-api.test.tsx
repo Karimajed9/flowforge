@@ -291,8 +291,27 @@ test('workflow execution history paginates with the query string', async () => {
 test('navigating away cancels the execution request', async () => {
   const aborted: string[] = []
   installFetch((url, init) => {
-    if (url === '/api/workflows') {
-      return json([])
+    const path = new URL(url, 'http://localhost').pathname
+    if (path === '/api/dashboard/overview') {
+      return json({
+        totalWorkflows: 0,
+        activeWorkflows: 0,
+        totalExecutions: 0,
+        succeededExecutions: 0,
+        failedExecutions: 0,
+        successRate: null,
+        windowDays: 7,
+      })
+    }
+    if (path === '/api/executions') {
+      return json({
+        content: [],
+        totalElements: 0,
+        totalPages: 0,
+        size: 20,
+        number: 0,
+        empty: true,
+      })
     }
     return new Promise<Response>((_resolve, reject) => {
       const abort = () => {

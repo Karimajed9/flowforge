@@ -63,6 +63,21 @@ function input(id: string): HTMLInputElement {
   return element
 }
 
+function workflowPage(content: unknown[] = []) {
+  return {
+    content,
+    totalElements: content.length,
+    totalPages: content.length === 0 ? 0 : 1,
+    size: 20,
+    number: 0,
+    empty: content.length === 0,
+  }
+}
+
+function isWorkflowCollection(url: string) {
+  return new URL(url, 'http://localhost').pathname === '/api/workflows'
+}
+
 function textArea(id: string): HTMLTextAreaElement {
   const element = document.getElementById(id)
   if (!(element instanceof HTMLTextAreaElement)) {
@@ -73,8 +88,8 @@ function textArea(id: string): HTMLTextAreaElement {
 
 test('workflow list shows saved workflows and their ids', async () => {
   installFetch((call) => {
-    if (call.url === '/api/workflows' && call.method === 'GET') {
-      return json([workflow()])
+    if (isWorkflowCollection(call.url) && call.method === 'GET') {
+      return json(workflowPage([workflow()]))
     }
     return json({ detail: 'Not found' }, 404)
   })
@@ -102,7 +117,7 @@ test('workflow list shows loading, empty, and error states', async () => {
   const view = renderAt('/workflows')
   expect(await screen.findByText('Loading workflows')).toBeTruthy()
   for (const resolve of pending) {
-    resolve(json([]))
+    resolve(json(workflowPage()))
   }
   expect(await screen.findByRole('heading', { name: 'No workflows yet' })).toBeTruthy()
 
@@ -118,8 +133,8 @@ test('workflow list shows loading, empty, and error states', async () => {
 
 test('creating a workflow shows backend errors and opens the new workflow', async () => {
   const calls = installFetch((call) => {
-    if (call.method === 'GET' && call.url === '/api/workflows') {
-      return json([])
+    if (call.method === 'GET' && isWorkflowCollection(call.url)) {
+      return json(workflowPage())
     }
     if (call.method === 'POST' && call.url === '/api/workflows') {
       if ((call.body as { name?: string }).name === 'Taken') {

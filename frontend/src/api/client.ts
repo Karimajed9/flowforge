@@ -1,13 +1,16 @@
 import { ApiError, isAbort } from './errors.ts'
 import {
+  parseDashboardOverview,
   parseExecution,
   parseExecutionPage,
+  parseRecentExecutionPage,
   parseStepList,
   parseWorkflow,
-  parseWorkflowList,
+  parseWorkflowPage,
   parseWorkflowStep,
   parseWorkflowSteps,
 } from './parse.ts'
+import type { DashboardOverview, RecentExecution } from '../types/dashboard.ts'
 import type { PageResponse, WorkflowExecution } from '../types/execution.ts'
 import type { ExecutionStep } from '../types/stepHistory.ts'
 import type { Workflow, WorkflowStep } from '../types/workflow.ts'
@@ -135,8 +138,34 @@ async function request(
   return body.value
 }
 
-export function listWorkflows(signal?: AbortSignal): Promise<Workflow[]> {
-  return request('/api/workflows', signal).then(parseWorkflowList)
+const PAGE_SIZE = 20
+
+export function listWorkflows(
+  page: number,
+  signal?: AbortSignal,
+): Promise<PageResponse<Workflow>> {
+  const params = new URLSearchParams({
+    page: String(page),
+    size: String(PAGE_SIZE),
+  })
+  return request(`/api/workflows?${params}`, signal).then(parseWorkflowPage)
+}
+
+export function getDashboardOverview(
+  signal?: AbortSignal,
+): Promise<DashboardOverview> {
+  return request('/api/dashboard/overview', signal).then(parseDashboardOverview)
+}
+
+export function listRecentExecutions(
+  page: number,
+  signal?: AbortSignal,
+): Promise<PageResponse<RecentExecution>> {
+  const params = new URLSearchParams({
+    page: String(page),
+    size: String(PAGE_SIZE),
+  })
+  return request(`/api/executions?${params}`, signal).then(parseRecentExecutionPage)
 }
 
 export function getWorkflow(

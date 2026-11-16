@@ -1,10 +1,12 @@
 package com.karimmajed.flowforge.controller;
 
 import com.karimmajed.flowforge.dto.ExecutionStepResponse;
+import com.karimmajed.flowforge.dto.RecentExecutionResponse;
 import com.karimmajed.flowforge.dto.WorkflowExecutionResponse;
 import com.karimmajed.flowforge.enums.ExecutionStatus;
 import com.karimmajed.flowforge.enums.ExecutionStepStatus;
 import com.karimmajed.flowforge.enums.StepType;
+import com.karimmajed.flowforge.service.DashboardReadService;
 import com.karimmajed.flowforge.service.ExecutionStepHistoryService;
 import com.karimmajed.flowforge.service.WorkflowExecutionService;
 
@@ -40,6 +42,9 @@ class WorkflowExecutionControllerTest {
 
     @MockitoBean
     private ExecutionStepHistoryService stepHistory;
+
+    @MockitoBean
+    private DashboardReadService dashboardReads;
 
     @Test
     void getExecutionReturnsTheRecord() throws Exception {
@@ -219,6 +224,45 @@ class WorkflowExecutionControllerTest {
                 .andExpect(status().isBadRequest());
 
         verifyNoInteractions(service, stepHistory);
+    }
+
+    @Test
+    void recentExecutionsOmitPayloadsAndSecrets() throws Exception {
+        when(dashboardReads.recentExecutions(0, 20)).thenReturn(new PageImpl<>(List.of(
+                new RecentExecutionResponse(
+                        21L,
+                        4L,
+                        "Onboarding",
+                        ExecutionStatus.FAILED,
+                        OffsetDateTime.parse("2026-11-16T15:04:00Z"),
+                        "downstream rejected the request"))));
+
+        mockMvc.perform(get("/api/executions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].id").value(21))
+                .andExpect(jsonPath("$.content[0].workflowId").value(4))
+                .andExpect(jsonPath("$.content[0].workflowName").value("Onboarding"))
+                .andExpect(jsonPath("$.content[0].status").value("FAILED"))
+                .andExpect(jsonPath("$.content[0].failureReason")
+                        .value("downstream rejected the request"))
+                .andExpect(jsonPath("$.content[0].payload").doesNotExist())
+                .andExpect(jsonPath("$.content[0].idempotencyKey").doesNotExist())
+                .andExpect(jsonPath("$.content[0].webhookToken").doesNotExist())
+                .andExpect(jsonPath("$.content[0].webhookTokenHash").doesNotExist())
+                .andExpect(jsonPath("$.totalElements").value(1));
+
+        verify(dashboardReads).recentExecutions(0, 20);
+        verifyNoInteractions(service, stepHistory);
+    }
+
+    @Test
+    void recentExecutionsRejectAnOversizedPage() throws Exception {
+        when(dashboardReads.recentExecutions(0, 101)).thenThrow(new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "Page must be >= 0 and size must be between 1 and 100"));
+
+        mockMvc.perform(get("/api/executions").param("size", "101"))
+                .andExpect(status().isBadRequest());
     }
 
     private static WorkflowExecutionResponse sample() {

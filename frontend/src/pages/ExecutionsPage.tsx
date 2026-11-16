@@ -46,8 +46,8 @@ export function ExecutionsPage() {
               Workflow id
             </label>
             <p className="mt-2 text-sm leading-6 text-muted">
-              There is no API that lists every execution. Enter a workflow id
-              to load that workflow and its execution history.
+              This page loads one workflow and its execution history. Recent
+              executions across workflows are on the overview.
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row">

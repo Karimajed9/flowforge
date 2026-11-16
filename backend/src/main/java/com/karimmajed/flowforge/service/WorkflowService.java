@@ -7,12 +7,13 @@ import com.karimmajed.flowforge.entity.Workflow;
 import com.karimmajed.flowforge.repository.WorkflowRepository;
 import com.karimmajed.flowforge.dto.WebhookTokenResponse;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
-
-import java.util.List;
 
 @Service
 public class WorkflowService {
@@ -37,11 +38,25 @@ public class WorkflowService {
     }
 
     @Transactional(readOnly = true)
-    public List<WorkflowResponse> getAll() {
-        return repository.findAll()
-            .stream()
-            .map(WorkflowResponse::from)
-            .toList();
+    public Page<WorkflowResponse> getPage(int page, int size) {
+        if (page < 0 || size < 1 || size > 100) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "Page must be >= 0 and size must be between 1 and 100"
+            );
+        }
+
+        PageRequest pageable = PageRequest.of(
+            page,
+            size,
+            Sort.by(
+                Sort.Order.desc("createdAt"),
+                Sort.Order.desc("id")
+            )
+        );
+
+        return repository.findAll(pageable)
+            .map(WorkflowResponse::from);
     }
 
     @Transactional(readOnly = true)

@@ -6,6 +6,7 @@ import type {
 } from '../types/execution.ts'
 import { EXECUTION_STATUSES } from '../types/execution.ts'
 import type { ExecutionStep, StepHistoryStatus } from '../types/stepHistory.ts'
+import type { DashboardOverview, RecentExecution } from '../types/dashboard.ts'
 import type { Workflow, WorkflowStep } from '../types/workflow.ts'
 
 const STEP_STATUSES = [
@@ -130,10 +131,63 @@ export function parseStep(value: unknown): ExecutionStep {
 }
 
 export function parseExecutionPage(value: unknown): PageResponse<WorkflowExecution> {
+  return parsePage(value, parseExecution)
+}
+
+export function parseWorkflowPage(value: unknown): PageResponse<Workflow> {
+  return parsePage(value, parseWorkflow)
+}
+
+export function parseRecentExecution(value: unknown): RecentExecution {
+  if (!isRecord(value)) {
+    unexpected()
+  }
+  return {
+    id: requiredNumber(value, 'id'),
+    workflowId: requiredNumber(value, 'workflowId'),
+    workflowName: requiredString(value, 'workflowName'),
+    status: oneOf<ExecutionStatus>(value.status, EXECUTION_STATUSES),
+    createdAt: requiredString(value, 'createdAt'),
+    failureReason: nullableString(value, 'failureReason'),
+  }
+}
+
+export function parseRecentExecutionPage(
+  value: unknown,
+): PageResponse<RecentExecution> {
+  return parsePage(value, parseRecentExecution)
+}
+
+export function parseDashboardOverview(value: unknown): DashboardOverview {
+  if (!isRecord(value)) {
+    unexpected()
+  }
+  return {
+    totalWorkflows: requiredNumber(value, 'totalWorkflows'),
+    activeWorkflows: requiredNumber(value, 'activeWorkflows'),
+    totalExecutions: requiredNumber(value, 'totalExecutions'),
+    succeededExecutions: requiredNumber(value, 'succeededExecutions'),
+    failedExecutions: requiredNumber(value, 'failedExecutions'),
+    successRate: nullableRate(value),
+    windowDays: requiredNumber(value, 'windowDays'),
+  }
+}
+
+function nullableRate(record: Record<string, unknown>): number | null {
+  if (!Object.hasOwn(record, 'successRate') || record.successRate == null) {
+    return null
+  }
+  if (typeof record.successRate !== 'number' || !Number.isFinite(record.successRate)) {
+    unexpected()
+  }
+  return record.successRate
+}
+
+function parsePage<T>(value: unknown, parseItem: (item: unknown) => T): PageResponse<T> {
   if (!isRecord(value) || !Array.isArray(value.content)) {
     unexpected()
   }
-  const content = value.content.map(parseExecution)
+  const content = value.content.map(parseItem)
   return {
     content,
     totalElements: requiredNumber(value, 'totalElements'),
@@ -142,13 +196,6 @@ export function parseExecutionPage(value: unknown): PageResponse<WorkflowExecuti
     number: requiredNumber(value, 'number'),
     empty: typeof value.empty === 'boolean' ? value.empty : content.length === 0,
   }
-}
-
-export function parseWorkflowList(value: unknown): Workflow[] {
-  if (!Array.isArray(value)) {
-    unexpected()
-  }
-  return value.map(parseWorkflow)
 }
 
 export function parseStepList(value: unknown): ExecutionStep[] {

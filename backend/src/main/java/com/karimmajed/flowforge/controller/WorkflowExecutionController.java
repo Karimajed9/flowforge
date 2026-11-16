@@ -1,7 +1,9 @@
 package com.karimmajed.flowforge.controller;
 
 import com.karimmajed.flowforge.dto.ExecutionStepResponse;
+import com.karimmajed.flowforge.dto.RecentExecutionResponse;
 import com.karimmajed.flowforge.dto.WorkflowExecutionResponse;
+import com.karimmajed.flowforge.service.DashboardReadService;
 import com.karimmajed.flowforge.service.ExecutionStepHistoryService;
 import com.karimmajed.flowforge.service.WorkflowExecutionService;
 
@@ -18,11 +20,23 @@ public class WorkflowExecutionController {
 
     private final ExecutionStepHistoryService stepHistory;
 
+    private final DashboardReadService dashboardReads;
+
     public WorkflowExecutionController(
             WorkflowExecutionService service,
-            ExecutionStepHistoryService stepHistory) {
+            ExecutionStepHistoryService stepHistory,
+            DashboardReadService dashboardReads) {
         this.service = service;
         this.stepHistory = stepHistory;
+        this.dashboardReads = dashboardReads;
+    }
+
+    @GetMapping("/executions")
+    public Page<RecentExecutionResponse> recentExecutions(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+
+        return dashboardReads.recentExecutions(page, size);
     }
 
     @GetMapping("/executions/{id}")

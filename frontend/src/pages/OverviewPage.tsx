@@ -1,23 +1,54 @@
-import { Link } from 'react-router'
-import { useWorkflowList } from '../api/hooks.ts'
+import { Link, useSearchParams } from 'react-router'
+import { useDashboardOverview, useRecentExecutions } from '../api/hooks.ts'
 import { EmptyState } from '../components/EmptyState.tsx'
 import { ErrorState } from '../components/ErrorState.tsx'
 import { LoadingState } from '../components/LoadingState.tsx'
 import { StatusBadge } from '../components/StatusBadge.tsx'
-import { EXECUTION_STATUSES } from '../types/execution.ts'
+import { formatTimestamp, pageIndex } from '../lib/format.ts'
+import type { DashboardOverview, RecentExecution } from '../types/dashboard.ts'
+import type { PageResponse } from '../types/execution.ts'
 
 export function OverviewPage() {
-  const workflows = useWorkflowList()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const page = pageIndex(searchParams.get('page'))
+  const overview = useDashboardOverview()
+  const recent = useRecentExecutions(page)
+
+  function setPage(next: number) {
+    const updated = new URLSearchParams(searchParams)
+    if (next <= 0) {
+      updated.delete('page')
+    } else {
+      updated.set('page', String(next))
+    }
+    setSearchParams(updated)
+  }
+
+  function refresh() {
+    overview.retry()
+    recent.retry()
+  }
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-6">
       <section className="rounded-2xl border border-line bg-navy-900 p-6 sm:p-8">
-        <p className="text-sm font-medium text-teal-300">Dashboard</p>
-        <h2 className="mt-2 text-2xl font-semibold">Workflow activity</h2>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-muted">
-          Review workflows, their steps, and the executions recorded for each
-          one. Recovery and abandonment stay outside this dashboard.
-        </p>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-sm font-medium text-teal-300">Dashboard</p>
+            <h2 className="mt-2 text-2xl font-semibold">Workflow activity</h2>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-muted">
+              Counts come from the workflow and execution records. Success and
+              failure counts use finished executions inside the reported window.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={refresh}
+            className="rounded-lg border border-line px-3 py-2 text-sm font-semibold text-ink hover:bg-navy-800"
+          >
+            Refresh
+          </button>
+        </div>
         <div className="mt-6 flex flex-col gap-3 sm:flex-row">
           <Link
             to="/workflows"
@@ -34,44 +65,171 @@ export function OverviewPage() {
         </div>
       </section>
 
-      {workflows.state.kind === 'loading' ? (
-        <LoadingState label="Loading workflows" />
+      {overview.state.kind === 'loading' ? (
+        <LoadingState label="Loading overview" />
       ) : null}
-      {workflows.state.kind === 'error' ? (
-        <ErrorState message={workflows.state.message} onRetry={workflows.retry} />
+      {overview.state.kind === 'error' ? (
+        <ErrorState message={overview.state.message} onRetry={overview.retry} />
       ) : null}
-      {workflows.state.kind === 'ready' && workflows.state.data.length === 0 ? (
-        <EmptyState
-          title="No workflows yet"
-          description="GET /api/workflows returned an empty list. Executions are stored per workflow, so the executions page stays empty until a workflow exists."
-        />
-      ) : null}
-      {workflows.state.kind === 'ready' && workflows.state.data.length > 0 ? (
-        <section className="rounded-2xl border border-line bg-navy-900 p-6">
-          <p className="text-sm text-muted">Workflows</p>
-          <p className="mt-2 text-3xl font-semibold">
-            {workflows.state.data.length}
-          </p>
-          <Link
-            to="/workflows"
-            className="mt-4 inline-block text-sm font-medium text-teal-300 hover:text-teal-400"
-          >
-            Open the list
-          </Link>
-        </section>
+      {overview.state.kind === 'ready' ? (
+        <OverviewStats overview={overview.state.data} />
       ) : null}
 
-      <section className="rounded-2xl border border-line bg-navy-900 p-6">
-        <h2 className="text-lg font-semibold">Execution statuses</h2>
-        <p className="mt-2 text-sm leading-6 text-muted">
-          These are the execution statuses returned by the API.
-        </p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {EXECUTION_STATUSES.map((status) => (
-            <StatusBadge key={status} status={status} />
-          ))}
-        </div>
-      </section>
+      {recent.state.kind === 'loading' ? (
+        <LoadingState label="Loading recent executions" />
+      ) : null}
+      {recent.state.kind === 'error' ? (
+        <ErrorState message={recent.state.message} onRetry={recent.retry} />
+      ) : null}
+      {recent.state.kind === 'ready' ? (
+        <RecentExecutions
+          page={recent.state.data}
+          onPage={setPage}
+        />
+      ) : null}
     </div>
+  )
+}
+
+function OverviewStats({ overview }: { overview: DashboardOverview }) {
+  const windowLabel = `Last ${overview.windowDays} days`
+  return (
+    <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <Stat label="Total workflows" value={String(overview.totalWorkflows)} detail="All workflows" />
+      <Stat
+        label="Active workflows"
+        value={String(overview.activeWorkflows)}
+        detail="Currently active"
+      />
+      <Stat
+        label="Total executions"
+        value={String(overview.totalExecutions)}
+        detail="All time"
+      />
+      <Stat
+        label="Succeeded"
+        value={String(overview.succeededExecutions)}
+        detail={windowLabel}
+      />
+      <Stat
+        label="Failed"
+        value={String(overview.failedExecutions)}
+        detail={windowLabel}
+      />
+      <Stat
+        label="Success rate"
+        value={overview.successRate == null ? '—' : `${Math.round(overview.successRate * 100)}%`}
+        detail={
+          overview.successRate == null
+            ? `No finished executions in the last ${overview.windowDays} days`
+            : windowLabel
+        }
+      />
+    </section>
+  )
+}
+
+function Stat({
+  label,
+  value,
+  detail,
+}: {
+  label: string
+  value: string
+  detail: string
+}) {
+  return (
+    <article className="rounded-2xl border border-line bg-navy-900 p-5">
+      <p className="text-sm text-muted">{label}</p>
+      <p className="mt-2 text-3xl font-semibold">{value}</p>
+      <p className="mt-2 text-sm leading-6 text-muted">{detail}</p>
+    </article>
+  )
+}
+
+function RecentExecutions({
+  page,
+  onPage,
+}: {
+  page: PageResponse<RecentExecution>
+  onPage: (page: number) => void
+}) {
+  return (
+    <section className="flex flex-col gap-4">
+      <h2 className="text-lg font-semibold">Recent executions</h2>
+      {page.totalElements === 0 ? (
+        <EmptyState
+          title="No executions yet"
+          description="Execution counts stay at zero until a workflow records an execution."
+        />
+      ) : null}
+      {page.totalElements > 0 && page.content.length === 0 ? (
+        <EmptyState
+          title="No executions on this page"
+          description="This page is outside the recent executions that are available."
+        />
+      ) : null}
+      {page.content.length > 0 ? (
+        <ul className="grid gap-4">
+          {page.content.map((execution) => (
+            <li
+              key={execution.id}
+              className="rounded-2xl border border-line bg-navy-900 p-5"
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold">
+                    <Link
+                      to={`/workflows/${execution.workflowId}`}
+                      className="hover:text-teal-300"
+                    >
+                      {execution.workflowName}
+                    </Link>
+                  </h3>
+                  <p className="mt-1 text-sm text-muted">
+                    Execution {execution.id} · {formatTimestamp(execution.createdAt)}
+                  </p>
+                </div>
+                <StatusBadge status={execution.status} />
+              </div>
+              {execution.failureReason ? (
+                <p className="mt-4 text-sm leading-6 text-red-100">
+                  {execution.failureReason}
+                </p>
+              ) : null}
+              <Link
+                to={`/executions/${execution.id}`}
+                className="mt-4 inline-block text-sm font-medium text-teal-300 hover:text-teal-400"
+              >
+                Open details
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {page.totalPages > 1 ? (
+        <div className="flex items-center justify-between gap-3">
+          <button
+            type="button"
+            className="rounded-lg border border-line px-3 py-2 text-sm font-semibold text-ink hover:bg-navy-800 disabled:opacity-40"
+            disabled={page.number <= 0}
+            onClick={() => onPage(page.number - 1)}
+          >
+            Previous
+          </button>
+          <p className="text-sm text-muted">
+            Page {page.number + 1} of {page.totalPages}
+          </p>
+          <button
+            type="button"
+            className="rounded-lg border border-line px-3 py-2 text-sm font-semibold text-ink hover:bg-navy-800 disabled:opacity-40"
+            disabled={page.number + 1 >= page.totalPages}
+            onClick={() => onPage(page.number + 1)}
+          >
+            Next
+          </button>
+        </div>
+      ) : null}
+    </section>
   )
 }
