@@ -1,7 +1,11 @@
 package com.karimmajed.flowforge.controller;
 
+import com.karimmajed.flowforge.dto.ExecutionStepResponse;
 import com.karimmajed.flowforge.dto.WorkflowExecutionResponse;
 import com.karimmajed.flowforge.enums.ExecutionStatus;
+import com.karimmajed.flowforge.enums.ExecutionStepStatus;
+import com.karimmajed.flowforge.enums.StepType;
+import com.karimmajed.flowforge.service.ExecutionStepHistoryService;
 import com.karimmajed.flowforge.service.WorkflowExecutionService;
 
 import org.junit.jupiter.api.Test;
@@ -33,6 +37,9 @@ class WorkflowExecutionControllerTest {
 
     @MockitoBean
     private WorkflowExecutionService service;
+
+    @MockitoBean
+    private ExecutionStepHistoryService stepHistory;
 
     @Test
     void getExecutionReturnsTheRecord() throws Exception {
@@ -132,6 +139,80 @@ class WorkflowExecutionControllerTest {
                 .andExpect(status().isBadRequest());
 
         verifyNoInteractions(service);
+    }
+
+    @Test
+    void getExecutionStepsReturnsCheckpointHistory() throws Exception {
+        when(stepHistory.getSteps(21L)).thenReturn(List.of(
+                new ExecutionStepResponse(
+                        4L,
+                        "Order",
+                        StepType.VALIDATE_FIELDS,
+                        1,
+                        ExecutionStepStatus.SUCCEEDED,
+                        1,
+                        null,
+                        OffsetDateTime.parse("2026-11-15T18:00:00Z"),
+                        OffsetDateTime.parse("2026-11-15T18:00:01Z")),
+                new ExecutionStepResponse(
+                        8L,
+                        "Notify",
+                        StepType.HTTP_REQUEST,
+                        2,
+                        ExecutionStepStatus.FAILED,
+                        1,
+                        "HTTP status 404",
+                        OffsetDateTime.parse("2026-11-15T18:00:01Z"),
+                        OffsetDateTime.parse("2026-11-15T18:00:02Z")),
+                new ExecutionStepResponse(
+                        9L,
+                        "Customer",
+                        StepType.VALIDATE_FIELDS,
+                        3,
+                        ExecutionStepStatus.NOT_STARTED,
+                        null,
+                        null,
+                        null,
+                        null)));
+
+        mockMvc.perform(get("/api/executions/{id}/steps", 21))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].stepId").value(4))
+                .andExpect(jsonPath("$[0].name").value("Order"))
+                .andExpect(jsonPath("$[0].stepType").value("VALIDATE_FIELDS"))
+                .andExpect(jsonPath("$[0].position").value(1))
+                .andExpect(jsonPath("$[0].status").value("SUCCEEDED"))
+                .andExpect(jsonPath("$[0].attemptNumber").value(1))
+                .andExpect(jsonPath("$[0].failureReason").value(nullValue()))
+                .andExpect(jsonPath("$[1].status").value("FAILED"))
+                .andExpect(jsonPath("$[1].failureReason").value("HTTP status 404"))
+                .andExpect(jsonPath("$[2].status").value("NOT_STARTED"))
+                .andExpect(jsonPath("$[2].attemptNumber").value(nullValue()))
+                .andExpect(jsonPath("$[2].startedAt").value(nullValue()))
+                .andExpect(jsonPath("$[0].attemptToken").doesNotExist())
+                .andExpect(jsonPath("$[1].configuration").doesNotExist())
+                .andExpect(jsonPath("$[1].body").doesNotExist());
+
+        verify(stepHistory).getSteps(21L);
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void missingExecutionStepsAreNotFound() throws Exception {
+        when(stepHistory.getSteps(99L)).thenThrow(new ResponseStatusException(
+                HttpStatus.NOT_FOUND,
+                "Execution not found"));
+
+        mockMvc.perform(get("/api/executions/{id}/steps", 99))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void nonNumericExecutionStepsIdDoesNotCallTheService() throws Exception {
+        mockMvc.perform(get("/api/executions/{id}/steps", "abc"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(service, stepHistory);
     }
 
     private static WorkflowExecutionResponse sample() {

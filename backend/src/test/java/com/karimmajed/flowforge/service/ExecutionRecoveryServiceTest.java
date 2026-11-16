@@ -5,8 +5,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import org.mockito.ArgumentMatchers;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import org.springframework.http.HttpStatus;
@@ -21,7 +23,6 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
@@ -67,7 +68,10 @@ class ExecutionRecoveryServiceTest {
 
     @Test
     void missingExecutionIsNotFound() {
-        when(jdbc.query(anyString(), any(RowMapper.class), eq(21L)))
+        Mockito.<List<Object>>when(jdbc.query(
+                        anyString(),
+                        ArgumentMatchers.<RowMapper<Object>>any(),
+                        eq(21L)))
                 .thenReturn(List.of());
 
         ResponseStatusException ex = assertThrows(
@@ -146,7 +150,10 @@ class ExecutionRecoveryServiceTest {
             int attempts,
             OffsetDateTime lastRequestedAt) {
 
-        when(jdbc.query(anyString(), any(RowMapper.class), eq(21L)))
+        Mockito.<List<Object>>when(jdbc.query(
+                        anyString(),
+                        ArgumentMatchers.<RowMapper<Object>>any(),
+                        eq(21L)))
                 .thenAnswer(invocation -> {
                     RowMapper<Object> mapper = invocation.getArgument(1);
                     ResultSet rs = mock(ResultSet.class);
