@@ -57,6 +57,21 @@ flowforge:
   consumer:
     enabled: true
 
+  rabbitmq:
+    management-url: ${FLOWFORGE_RABBITMQ_MANAGEMENT_URL:http://localhost:15672}
+    # rabbitmq-setup may apply flowforge-dlx after this process starts.
+    policy-wait: 60s
+    policy-interval: 2s
+
   recovery:
     enabled: ${FLOWFORGE_RECOVERY_ENABLED:false}
     token: ${FLOWFORGE_RECOVERY_TOKEN:}
+
+  http-get:
+    connect-timeout: 2s
+    request-timeout: 5s
+    max-response-bytes: 65536
+    # Default deny. A host is allowed only when named here exactly.
+    # For a local test, set FLOWFORGE_HTTP_GET_ALLOWED_HOSTS in ../.env.
+    # There is no allow-all value.
+    allowed-hosts: []

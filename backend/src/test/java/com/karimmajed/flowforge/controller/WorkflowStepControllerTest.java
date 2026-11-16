@@ -74,7 +74,7 @@ class WorkflowStepControllerTest {
                 "Call API",
                 StepType.HTTP_REQUEST,
                 2,
-                Map.of("method", "POST", "url", "https://example.com/hook")));
+                Map.of("method", "GET", "url", "https://example.com/hook")));
 
         mockMvc.perform(post("/api/workflows/{workflowId}/steps", 4)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -84,7 +84,7 @@ class WorkflowStepControllerTest {
                                   "stepType": "HTTP_REQUEST",
                                   "position": 2,
                                   "configuration": {
-                                    "method": "POST",
+                                    "method": "GET",
                                     "url": "https://example.com/hook"
                                   }
                                 }
@@ -94,7 +94,7 @@ class WorkflowStepControllerTest {
                 .andExpect(jsonPath("$.name").value("Call API"))
                 .andExpect(jsonPath("$.stepType").value("HTTP_REQUEST"))
                 .andExpect(jsonPath("$.position").value(2))
-                .andExpect(jsonPath("$.configuration.method").value("POST"))
+                .andExpect(jsonPath("$.configuration.method").value("GET"))
                 .andExpect(jsonPath("$.configuration.url").value("https://example.com/hook"));
 
         verify(service).create(eq(4L), any(CreateWorkflowStepRequest.class));
@@ -202,7 +202,7 @@ class WorkflowStepControllerTest {
     void create_invalidConfiguration_isBadRequest() throws Exception {
         when(service.create(eq(4L), any())).thenThrow(new ResponseStatusException(
                 HttpStatus.BAD_REQUEST,
-                "Method must be GET or POST"));
+                "Method must be GET"));
 
         mockMvc.perform(post("/api/workflows/{workflowId}/steps", 4)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -211,7 +211,7 @@ class WorkflowStepControllerTest {
                                   "name": "Call API",
                                   "stepType": "HTTP_REQUEST",
                                   "position": 1,
-                                  "configuration": { "method": "PUT", "url": "https://example.com" }
+                                  "configuration": { "method": "POST", "url": "https://example.com" }
                                 }
                                 """))
                 .andExpect(status().isBadRequest());

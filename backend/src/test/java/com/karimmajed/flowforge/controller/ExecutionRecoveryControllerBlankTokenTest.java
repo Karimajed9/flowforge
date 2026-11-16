@@ -1,5 +1,6 @@
 package com.karimmajed.flowforge.controller;
 
+import com.karimmajed.flowforge.service.ExecutionAbandonmentService;
 import com.karimmajed.flowforge.service.ExecutionRecoveryService;
 
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,9 @@ class ExecutionRecoveryControllerBlankTokenTest {
 
     @MockitoBean
     private ExecutionRecoveryService service;
+
+    @MockitoBean
+    private ExecutionAbandonmentService abandonment;
 
     @Test
     void blankConfiguredTokenIsForbidden() throws Exception {

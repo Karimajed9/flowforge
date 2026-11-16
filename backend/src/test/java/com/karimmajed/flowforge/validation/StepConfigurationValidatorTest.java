@@ -41,7 +41,7 @@ class StepConfigurationValidatorTest {
     }
 
     @Test
-    void acceptsHttpGetAndPost() {
+    void acceptsHttpsGet() {
         assertThatCode(() -> validator.validate(
                 StepType.HTTP_REQUEST,
                 Map.of("method", "GET", "url", "https://example.com/hook")))
@@ -50,7 +50,7 @@ class StepConfigurationValidatorTest {
         assertThatCode(() -> validator.validate(
                 StepType.HTTP_REQUEST,
                 Map.of(
-                        "method", "POST",
+                        "method", "GET",
                         "url", "https://example.com:8443/hook?x=1")))
                 .doesNotThrowAnyException();
 
@@ -175,17 +175,32 @@ class StepConfigurationValidatorTest {
                         "http method PUT",
                         StepType.HTTP_REQUEST,
                         Map.of("method", "PUT", "url", "https://example.com"),
-                        "Method must be GET or POST"),
+                        "Method must be GET"),
+                args(
+                        "http method POST",
+                        StepType.HTTP_REQUEST,
+                        Map.of("method", "POST", "url", "https://example.com"),
+                        "Method must be GET"),
+                args(
+                        "http method PATCH",
+                        StepType.HTTP_REQUEST,
+                        Map.of("method", "PATCH", "url", "https://example.com"),
+                        "Method must be GET"),
+                args(
+                        "http method DELETE",
+                        StepType.HTTP_REQUEST,
+                        Map.of("method", "DELETE", "url", "https://example.com"),
+                        "Method must be GET"),
                 args(
                         "http method lowercase",
                         StepType.HTTP_REQUEST,
                         Map.of("method", "get", "url", "https://example.com"),
-                        "Method must be GET or POST"),
+                        "Method must be GET"),
                 args(
                         "http method is not a string",
                         StepType.HTTP_REQUEST,
                         Map.of("method", 1, "url", "https://example.com"),
-                        "Method must be GET or POST"),
+                        "Method must be GET"),
                 args(
                         "url is not a string",
                         StepType.HTTP_REQUEST,
@@ -194,7 +209,7 @@ class StepConfigurationValidatorTest {
                 args(
                         "url longer than 2048 characters",
                         StepType.HTTP_REQUEST,
-                        Map.of("method", "POST", "url", tooLong),
+                        Map.of("method", "GET", "url", tooLong),
                         "Invalid URL"),
                 args(
                         "url with a space",
@@ -209,7 +224,7 @@ class StepConfigurationValidatorTest {
                 args(
                         "url has a fragment",
                         StepType.HTTP_REQUEST,
-                        Map.of("method", "POST", "url", "https://example.com/hook#section"),
+                        Map.of("method", "GET", "url", "https://example.com/hook#section"),
                         "A valid HTTPS URL is required"),
                 args(
                         "url has user info",
@@ -229,7 +244,7 @@ class StepConfigurationValidatorTest {
                 args(
                         "url is not an http address",
                         StepType.HTTP_REQUEST,
-                        Map.of("method", "POST", "url", "not-a-url"),
+                        Map.of("method", "GET", "url", "not-a-url"),
                         "A valid HTTPS URL is required")
         );
     }
