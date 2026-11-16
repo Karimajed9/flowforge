@@ -2,6 +2,8 @@ package com.karimmajed.flowforge.service;
 
 import com.karimmajed.flowforge.enums.StepType;
 import com.karimmajed.flowforge.exception.NonRetryableExecutionException;
+import com.karimmajed.flowforge.http.HttpGetResult;
+import com.karimmajed.flowforge.http.HttpsGetExecutor;
 import com.karimmajed.flowforge.service.ExecutionCheckpointStore.Claim;
 import com.karimmajed.flowforge.service.ExecutionCheckpointStore.Completion;
 import com.karimmajed.flowforge.service.ExecutionCheckpointStore.StepWork;
@@ -22,12 +24,22 @@ public class WorkflowExecutionProcessor {
 
     private final ExecutionCheckpointStore store;
 
+    private HttpsGetExecutor httpGet;
+
     private volatile Runnable beforeClaim = () -> {};
 
     private volatile Consumer<StepWork> onStepStart = work -> {};
 
-    public WorkflowExecutionProcessor(ExecutionCheckpointStore store) {
+    public WorkflowExecutionProcessor(
+            ExecutionCheckpointStore store,
+            HttpsGetExecutor httpGet) {
+
         this.store = store;
+        this.httpGet = httpGet;
+    }
+
+    void setHttpGet(HttpsGetExecutor httpGet) {
+        this.httpGet = httpGet;
     }
 
     void setBeforeClaim(Runnable beforeClaim) {
@@ -111,8 +123,51 @@ public class WorkflowExecutionProcessor {
             return;
         }
 
+        if (work.stepType() == StepType.HTTP_REQUEST) {
+            executeHttp(work);
+            return;
+        }
+
         throw new StepFailure(
                 "Unsupported executor: " + work.stepType());
+    }
+
+    private void executeHttp(StepWork work) {
+        Map<String, Object> configuration = work.configuration();
+
+        if (configuration == null) {
+            throw new StepFailure("Step configuration is missing");
+        }
+
+        Object method = configuration.get("method");
+        Object url = configuration.get("url");
+
+        if (!(method instanceof String httpMethod) || httpMethod.isBlank()) {
+            throw new StepFailure("HTTP method is missing");
+        }
+
+        if (!"GET".equals(httpMethod)) {
+            throw new StepFailure("Unsupported HTTP method: " + httpMethod);
+        }
+
+        if (!(url instanceof String urlString) || urlString.isBlank()) {
+            throw new StepFailure("HTTP URL is missing");
+        }
+
+        HttpGetResult result = httpGet.get(urlString);
+
+        switch (result.outcome()) {
+            case SUCCESS -> {
+                return;
+            }
+            case HTTP_STATUS -> throw new StepFailure(
+                    "HTTP status " + result.statusCode());
+            case TIMEOUT -> throw new StepFailure("HTTP request timed out");
+            case NETWORK -> throw new StepFailure("HTTP network failure");
+            case BLOCKED -> throw new StepFailure("HTTP destination blocked");
+            case RESPONSE_TOO_LARGE -> throw new StepFailure(
+                    "HTTP response too large");
+        }
     }
 
     private void validateFields(StepWork work) {

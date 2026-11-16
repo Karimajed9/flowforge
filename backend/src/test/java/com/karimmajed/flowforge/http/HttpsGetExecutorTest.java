@@ -1,6 +1,7 @@
 package com.karimmajed.flowforge.http;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -14,8 +15,10 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.lang.reflect.Field;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.net.http.HttpClient;
@@ -27,8 +30,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import com.sun.net.httpserver.HttpServer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class HttpsGetExecutorTest {
 
@@ -265,6 +272,101 @@ class HttpsGetExecutorTest {
         assertThat(client.connectTimeout()).contains(Duration.ofSeconds(2));
         assertThat(readTimeout(factory)).isEqualTo(Duration.ofSeconds(5));
         assertThat(properties.getAllowedHosts()).isEmpty();
+        assertThat(properties.getConnectTimeout()
+                .plus(properties.getConnectTimeout())
+                .plus(properties.getRequestTimeout()))
+                .isLessThan(com.karimmajed.flowforge.service.ExecutionCheckpointStore.LEASE);
+    }
+
+    @Test
+    void dnsLookupCannotOutliveTheConnectTimeout() throws Exception {
+        HttpGetProperties properties = properties(List.of("allowed.example"));
+        properties.setConnectTimeout(Duration.ofMillis(150));
+        properties.setRequestTimeout(Duration.ofSeconds(1));
+        ScriptedTransport transport = new ScriptedTransport();
+        HttpsGetExecutor executor = new HttpsGetExecutor(
+                properties,
+                RestClient.builder().requestFactory(transport).build(),
+                host -> {
+                    try {
+                        Thread.sleep(5_000);
+                    } catch (InterruptedException ex) {
+                        Thread.currentThread().interrupt();
+                    }
+                    return new InetAddress[] { InetAddress.getByName("8.8.8.8") };
+                });
+
+        long started = System.nanoTime();
+        HttpGetResult result = executor.get("https://allowed.example/slow-dns");
+
+        assertThat(result.outcome()).isEqualTo(HttpGetResult.Outcome.TIMEOUT);
+        assertThat(Duration.ofNanos(System.nanoTime() - started))
+                .isLessThan(Duration.ofSeconds(2));
+        assertThat(transport.uris).isEmpty();
+    }
+
+    @Test
+    void configuredBudgetMustFinishBeforeTheStepLease() {
+        HttpGetProperties properties = properties(List.of("allowed.example"));
+        properties.setConnectTimeout(Duration.ofSeconds(30));
+        properties.setRequestTimeout(Duration.ofMinutes(2));
+
+        assertThatThrownBy(() -> new HttpsGetExecutor(
+                properties,
+                RestClient.builder().build(),
+                host -> new InetAddress[] { InetAddress.getByName("8.8.8.8") }))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @Timeout(10)
+    void slowResponseBodyIsClosedWithinTheRequestTimeout() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        AtomicBoolean accepted = new AtomicBoolean();
+        server.createContext("/slow", exchange -> {
+            accepted.set(true);
+            exchange.sendResponseHeaders(200, 0);
+            OutputStream body = exchange.getResponseBody();
+            try {
+                while (!Thread.currentThread().isInterrupted()) {
+                    body.write(1);
+                    body.flush();
+                    Thread.sleep(200);
+                }
+            } catch (Exception ignored) {
+                // The client closes the stream when its deadline fires.
+            } finally {
+                body.close();
+            }
+        });
+        server.start();
+        try {
+            HttpGetProperties properties = new HttpGetProperties();
+            properties.setConnectTimeout(Duration.ofSeconds(1));
+            properties.setRequestTimeout(Duration.ofMillis(400));
+            RestClient client = HttpsGetClientFactory.restClient(properties);
+            long started = System.nanoTime();
+
+            assertThatThrownBy(() -> client.get()
+                    .uri("http://127.0.0.1:" + server.getAddress().getPort() + "/slow")
+                    .exchange((request, response) -> {
+                        try (response) {
+                            InputStream body = response.getBody();
+                            byte[] buffer = new byte[8];
+                            while (body.read(buffer) >= 0) {
+                                // A trickle must not keep this read open.
+                            }
+                            return null;
+                        }
+                    }))
+                    .isInstanceOf(ResourceAccessException.class);
+
+            assertThat(Duration.ofNanos(System.nanoTime() - started))
+                    .isLessThan(Duration.ofSeconds(3));
+            assertThat(accepted).isTrue();
+        } finally {
+            server.stop(0);
+        }
     }
 
     private static Duration readTimeout(

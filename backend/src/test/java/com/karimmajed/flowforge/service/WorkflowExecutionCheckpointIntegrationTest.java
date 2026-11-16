@@ -1,5 +1,7 @@
 package com.karimmajed.flowforge.service;
 
+import com.karimmajed.flowforge.http.HttpGetProperties;
+import com.karimmajed.flowforge.http.HttpsGetExecutor;
 import com.karimmajed.flowforge.repository.OutboxDeliveryStore;
 import com.karimmajed.flowforge.repository.OutboxDeliveryStore.PendingOutbox;
 
@@ -9,13 +11,21 @@ import org.junit.jupiter.api.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.boot.jdbc.test.autoconfigure.JdbcTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.client.ClientHttpRequest;
+import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceUtils;
+import org.springframework.mock.http.client.MockClientHttpRequest;
+import org.springframework.mock.http.client.MockClientHttpResponse;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -24,9 +34,17 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import javax.sql.DataSource;
+
+import java.net.InetAddress;
+import java.net.http.HttpTimeoutException;
+import java.sql.Connection;
+import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -39,11 +57,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @JdbcTest(properties = "spring.config.import=optional:classpath:application.properties")
+@EnableConfigurationProperties(HttpGetProperties.class)
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @ImportAutoConfiguration(FlywayAutoConfiguration.class)
 @Import({
         ExecutionCheckpointStore.class,
         WorkflowExecutionProcessor.class,
+        HttpsGetExecutor.class,
         OutboxDeliveryStore.class,
         ExecutionRecoveryService.class
 })
@@ -68,6 +88,12 @@ class WorkflowExecutionCheckpointIntegrationTest {
     @Autowired
     private ExecutionRecoveryService recovery;
 
+    @Autowired
+    private HttpsGetExecutor httpGet;
+
+    @Autowired
+    private DataSource dataSource;
+
     @BeforeEach
     void resetDatabase() {
         String url = jdbc.execute((ConnectionCallback<String>) connection ->
@@ -76,7 +102,15 @@ class WorkflowExecutionCheckpointIntegrationTest {
 
         processor.setBeforeClaim(null);
         processor.setOnStepStart(null);
+        processor.setHttpGet(httpGet);
 
+        jdbc.execute("""
+                DROP TRIGGER IF EXISTS flowforge_fail_checkpoint_success
+                ON execution_step_checkpoints
+                """);
+        jdbc.execute("""
+                DROP FUNCTION IF EXISTS flowforge_fail_checkpoint_success()
+                """);
         jdbc.update("DELETE FROM execution_step_checkpoints");
         jdbc.update("DELETE FROM execution_outbox");
         jdbc.update("DELETE FROM workflow_executions");
@@ -391,6 +425,259 @@ class WorkflowExecutionCheckpointIntegrationTest {
         assertThat(count).isEqualTo(1);
     }
 
+    @Test
+    void validationThenHttpGetSucceedsInOrder() throws Exception {
+        long workflowId = insertWorkflow();
+        long validationId = insertStep(workflowId, "Order", 1, "[\"orderId\"]");
+        long httpId = insertHttpStep(workflowId, "Notify", 2, "GET", "https://allowed.example/orders");
+        long confirmId = insertStep(workflowId, "Customer", 3, "[\"customerId\"]");
+        long executionId = insertExecution(
+                workflowId,
+                "QUEUED",
+                "{\"orderId\":\"o-1\",\"customerId\":\"c-1\"}");
+        List<Long> started = new ArrayList<>();
+        processor.setOnStepStart(work -> started.add(work.stepId()));
+        ScriptedHttp transport = new ScriptedHttp();
+        transport.respond(200, new byte[] { 'o', 'k' });
+        transport.checkNoTransaction = true;
+        processor.setHttpGet(httpExecutor(transport));
+
+        processor.process(executionId);
+
+        assertThat(started).containsExactly(validationId, httpId, confirmId);
+        assertThat(transport.uris).containsExactly(java.net.URI.create("https://allowed.example/orders"));
+        assertThat(transport.methods).containsExactly(HttpMethod.GET);
+        assertThat(transport.sawOpenTransaction).isFalse();
+        assertThat(executionStatus(executionId)).isEqualTo("SUCCEEDED");
+        assertThat(checkpoints(executionId)).containsExactly(
+                new SavedCheckpoint(validationId, "SUCCEEDED", 1, null),
+                new SavedCheckpoint(httpId, "SUCCEEDED", 1, null),
+                new SavedCheckpoint(confirmId, "SUCCEEDED", 1, null));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {404, 500})
+    void httpErrorStatusFailsTheExecution(int status) throws Exception {
+        long workflowId = insertWorkflow();
+        long httpId = insertHttpStep(workflowId, "Notify", 1, "GET", "https://allowed.example/missing");
+        long executionId = insertExecution(workflowId, "QUEUED", "{}");
+        ScriptedHttp transport = new ScriptedHttp();
+        transport.respond(status, "nope".getBytes());
+        processor.setHttpGet(httpExecutor(transport));
+
+        processor.process(executionId);
+
+        assertThat(executionStatus(executionId)).isEqualTo("FAILED");
+        assertThat(failureReason(executionId)).isEqualTo("HTTP status " + status);
+        assertThat(checkpoints(executionId)).containsExactly(
+                new SavedCheckpoint(httpId, "FAILED", 1, "HTTP status " + status));
+        assertThat(transport.uris).hasSize(1);
+    }
+
+    @Test
+    void httpTimeoutAndNetworkFailureAreTerminal() throws Exception {
+        long workflowId = insertWorkflow();
+        long timeoutStep = insertHttpStep(workflowId, "Slow", 1, "GET", "https://allowed.example/slow");
+        long timeoutExecution = insertExecution(workflowId, "QUEUED", "{}");
+        ScriptedHttp timeout = new ScriptedHttp();
+        timeout.fail(new ResourceAccessException(
+                "timed out",
+                new HttpTimeoutException("request timed out")));
+        processor.setHttpGet(httpExecutor(timeout));
+
+        processor.process(timeoutExecution);
+
+        assertThat(executionStatus(timeoutExecution)).isEqualTo("FAILED");
+        assertThat(failureReason(timeoutExecution)).isEqualTo("HTTP request timed out");
+        assertThat(checkpoints(timeoutExecution)).containsExactly(
+                new SavedCheckpoint(timeoutStep, "FAILED", 1, "HTTP request timed out"));
+
+        long networkWorkflow = insertWorkflow();
+        long networkStep = insertHttpStep(
+                networkWorkflow, "Down", 1, "GET", "https://allowed.example/down");
+        long networkExecution = insertExecution(networkWorkflow, "QUEUED", "{}");
+        ScriptedHttp network = new ScriptedHttp();
+        network.fail(new ResourceAccessException(
+                "reset",
+                new java.net.ConnectException("connection refused")));
+        processor.setHttpGet(httpExecutor(network));
+
+        processor.process(networkExecution);
+
+        assertThat(executionStatus(networkExecution)).isEqualTo("FAILED");
+        assertThat(failureReason(networkExecution)).isEqualTo("HTTP network failure");
+        assertThat(checkpoints(networkExecution)).containsExactly(
+                new SavedCheckpoint(networkStep, "FAILED", 1, "HTTP network failure"));
+        assertThat(network.uris).hasSize(1);
+    }
+
+    @Test
+    void blockedDestinationSendsNoRequest() throws Exception {
+        long workflowId = insertWorkflow();
+        long httpId = insertHttpStep(workflowId, "Notify", 1, "GET", "https://evil.example/secret");
+        long executionId = insertExecution(workflowId, "QUEUED", "{}");
+        ScriptedHttp transport = new ScriptedHttp();
+        processor.setHttpGet(httpExecutor(transport));
+
+        processor.process(executionId);
+
+        assertThat(transport.uris).isEmpty();
+        assertThat(executionStatus(executionId)).isEqualTo("FAILED");
+        assertThat(failureReason(executionId)).isEqualTo("HTTP destination blocked");
+        assertThat(checkpoints(executionId)).containsExactly(
+                new SavedCheckpoint(httpId, "FAILED", 1, "HTTP destination blocked"));
+    }
+
+    @Test
+    void postIsRejectedWithoutARequest() throws Exception {
+        long workflowId = insertWorkflow();
+        long httpId = insertHttpStep(workflowId, "Notify", 1, "POST", "https://allowed.example/orders");
+        long executionId = insertExecution(workflowId, "QUEUED", "{}");
+        ScriptedHttp transport = new ScriptedHttp();
+        processor.setHttpGet(httpExecutor(transport));
+
+        processor.process(executionId);
+
+        assertThat(transport.uris).isEmpty();
+        assertThat(executionStatus(executionId)).isEqualTo("FAILED");
+        assertThat(failureReason(executionId)).isEqualTo("Unsupported HTTP method: POST");
+        assertThat(checkpoints(executionId)).containsExactly(
+                new SavedCheckpoint(httpId, "FAILED", 1, "Unsupported HTTP method: POST"));
+    }
+
+    @Test
+    void completedHttpStepDoesNotRunAgain() throws Exception {
+        long workflowId = insertWorkflow();
+        insertHttpStep(workflowId, "Notify", 1, "GET", "https://allowed.example/orders");
+        long executionId = insertExecution(workflowId, "QUEUED", "{}");
+        ScriptedHttp transport = new ScriptedHttp();
+        transport.respond(200, new byte[0]);
+        processor.setHttpGet(httpExecutor(transport));
+
+        processor.process(executionId);
+        processor.process(executionId);
+
+        assertThat(transport.uris).hasSize(1);
+        assertThat(executionStatus(executionId)).isEqualTo("SUCCEEDED");
+    }
+
+    @Test
+    void expiredRunningHttpAttemptDoesNotReplay() throws Exception {
+        long workflowId = insertWorkflow();
+        long httpId = insertHttpStep(workflowId, "Notify", 1, "GET", "https://allowed.example/orders");
+        long executionId = insertExecution(workflowId, "QUEUED", "{}");
+        ScriptedHttp transport = new ScriptedHttp();
+        transport.fail(new IllegalStateException("simulated crash"));
+        processor.setHttpGet(httpExecutor(transport));
+
+        assertThrows(IllegalStateException.class, () -> processor.process(executionId));
+
+        assertThat(transport.uris).hasSize(1);
+        assertThat(executionStatus(executionId)).isEqualTo("RUNNING");
+        assertThat(checkpoints(executionId)).containsExactly(
+                new SavedCheckpoint(httpId, "RUNNING", 1, null));
+
+        jdbc.update("""
+                UPDATE execution_step_checkpoints
+                SET lease_until = CURRENT_TIMESTAMP - INTERVAL '1 minute'
+                WHERE execution_id = ?
+                """,
+                executionId);
+        transport.fail(new IllegalStateException("must not send again"));
+
+        IllegalStateException redelivery = assertThrows(
+                IllegalStateException.class,
+                () -> processor.process(executionId));
+
+        assertThat(redelivery.getMessage())
+                .isEqualTo("Unexpected RUNNING execution: " + executionId);
+        assertThat(transport.uris).hasSize(1);
+        assertThat(checkpoints(executionId)).containsExactly(
+                new SavedCheckpoint(httpId, "RUNNING", 1, null));
+    }
+
+    @Test
+    void databaseFailureAfterHttpLeavesTheCheckpointRunning() throws Exception {
+        long workflowId = insertWorkflow();
+        long httpId = insertHttpStep(workflowId, "Notify", 1, "GET", "https://allowed.example/orders");
+        long executionId = insertExecution(workflowId, "QUEUED", "{}");
+        ScriptedHttp transport = new ScriptedHttp();
+        transport.respond(200, new byte[0]);
+        processor.setHttpGet(httpExecutor(transport));
+        jdbc.execute("""
+                CREATE FUNCTION flowforge_fail_checkpoint_success()
+                RETURNS trigger
+                LANGUAGE plpgsql
+                AS $func$
+                BEGIN
+                    IF NEW.status = 'SUCCEEDED' THEN
+                        RAISE EXCEPTION 'forced checkpoint update failure';
+                    END IF;
+                    RETURN NEW;
+                END;
+                $func$
+                """);
+        jdbc.execute("""
+                CREATE TRIGGER flowforge_fail_checkpoint_success
+                BEFORE UPDATE ON execution_step_checkpoints
+                FOR EACH ROW
+                EXECUTE FUNCTION flowforge_fail_checkpoint_success()
+                """);
+
+        assertThrows(Exception.class, () -> processor.process(executionId));
+
+        assertThat(transport.uris).hasSize(1);
+        assertThat(executionStatus(executionId)).isEqualTo("RUNNING");
+        assertThat(checkpoints(executionId)).containsExactly(
+                new SavedCheckpoint(httpId, "RUNNING", 1, null));
+
+        IllegalStateException redelivery = assertThrows(
+                IllegalStateException.class,
+                () -> processor.process(executionId));
+
+        assertThat(redelivery.getMessage())
+                .isEqualTo("Unexpected RUNNING execution: " + executionId);
+        assertThat(transport.uris).hasSize(1);
+    }
+
+    private HttpsGetExecutor httpExecutor(ScriptedHttp transport) throws Exception {
+        HttpGetProperties properties = new HttpGetProperties();
+        properties.setAllowedHosts(List.of("allowed.example"));
+        properties.setConnectTimeout(Duration.ofSeconds(2));
+        properties.setRequestTimeout(Duration.ofSeconds(5));
+        return HttpsGetExecutor.withTransport(
+                properties,
+                transport,
+                host -> {
+                    try {
+                        return new InetAddress[] { InetAddress.getByName("8.8.8.8") };
+                    } catch (java.net.UnknownHostException ex) {
+                        throw new IllegalStateException(ex);
+                    }
+                });
+    }
+
+    private long insertHttpStep(
+            long workflowId,
+            String name,
+            int position,
+            String method,
+            String url) {
+
+        return jdbc.queryForObject("""
+                INSERT INTO workflow_steps (
+                    workflow_id, name, step_type, position, configuration
+                )
+                VALUES (?, ?, 'HTTP_REQUEST', ?, CAST(? AS jsonb))
+                RETURNING id
+                """,
+                Long.class,
+                workflowId,
+                name,
+                position,
+                "{\"method\":\"" + method + "\",\"url\":\"" + url + "\"}");
+    }
+
     private String runProcess(long executionId) {
         try {
             processor.process(executionId);
@@ -524,6 +811,52 @@ class WorkflowExecutionCheckpointIntegrationTest {
                         rs.getInt("attempt_number"),
                         rs.getString("failure_reason")),
                 executionId);
+    }
+
+    private final class ScriptedHttp implements ClientHttpRequestFactory {
+
+        private final Queue<org.springframework.http.client.ClientHttpResponse> responses =
+                new ArrayDeque<>();
+
+        private final List<java.net.URI> uris = new ArrayList<>();
+
+        private final List<HttpMethod> methods = new ArrayList<>();
+
+        private RuntimeException failure;
+
+        private boolean checkNoTransaction;
+
+        private boolean sawOpenTransaction;
+
+        void respond(int status, byte[] body) {
+            responses.add(new MockClientHttpResponse(body, status));
+        }
+
+        void fail(RuntimeException failure) {
+            this.failure = failure;
+        }
+
+        @Override
+        public ClientHttpRequest createRequest(java.net.URI uri, HttpMethod method) {
+            uris.add(uri);
+            methods.add(method);
+            if (checkNoTransaction) {
+                Connection connection = DataSourceUtils.getConnection(dataSource);
+                try {
+                    sawOpenTransaction = DataSourceUtils.isConnectionTransactional(
+                            connection,
+                            dataSource);
+                } finally {
+                    DataSourceUtils.releaseConnection(connection, dataSource);
+                }
+            }
+            if (failure != null) {
+                throw failure;
+            }
+            MockClientHttpRequest request = new MockClientHttpRequest(method, uri);
+            request.setResponse(responses.remove());
+            return request;
+        }
     }
 
     private record SavedCheckpoint(

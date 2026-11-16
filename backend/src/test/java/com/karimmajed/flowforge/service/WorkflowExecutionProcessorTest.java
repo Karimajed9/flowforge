@@ -2,6 +2,8 @@ package com.karimmajed.flowforge.service;
 
 import com.karimmajed.flowforge.enums.StepType;
 import com.karimmajed.flowforge.exception.NonRetryableExecutionException;
+import com.karimmajed.flowforge.http.HttpGetResult;
+import com.karimmajed.flowforge.http.HttpsGetExecutor;
 import com.karimmajed.flowforge.service.ExecutionCheckpointStore.Claim;
 import com.karimmajed.flowforge.service.ExecutionCheckpointStore.Completion;
 import com.karimmajed.flowforge.service.ExecutionCheckpointStore.StepWork;
@@ -13,11 +15,13 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -27,6 +31,9 @@ class WorkflowExecutionProcessorTest {
 
     @Mock
     private ExecutionCheckpointStore store;
+
+    @Mock
+    private HttpsGetExecutor httpGet;
 
     @InjectMocks
     private WorkflowExecutionProcessor processor;
@@ -87,24 +94,36 @@ class WorkflowExecutionProcessorTest {
     }
 
     @Test
-    void unsupportedHttpStepFails() {
-        StepWork work = new StepWork(
-                21L,
-                8L,
-                "Send HTTP Request",
-                StepType.HTTP_REQUEST,
-                Map.of("method", "GET", "url", "https://example.com"),
-                Map.of("orderId", 123),
-                "attempt-1",
-                1);
+    void unsupportedHttpMethodFailsWithoutARequest() {
+        StepWork work = httpWork("POST", "https://allowed.example/orders");
 
         when(store.claimNext(21L)).thenReturn(Claim.step(work));
-        when(store.fail(work, "Unsupported executor: HTTP_REQUEST")).thenReturn(true);
+        when(store.fail(work, "Unsupported HTTP method: POST")).thenReturn(true);
 
         processor.process(21L);
 
-        verify(store).fail(work, "Unsupported executor: HTTP_REQUEST");
+        verify(store).fail(work, "Unsupported HTTP method: POST");
+        verify(httpGet, never()).get(anyString());
         verify(store, never()).complete(work);
+    }
+
+    @Test
+    void httpGetSuccessCompletesTheStep() {
+        StepWork work = httpWork("GET", "https://allowed.example/orders");
+
+        when(store.claimNext(21L)).thenReturn(Claim.step(work));
+        when(httpGet.get("https://allowed.example/orders")).thenReturn(
+                new HttpGetResult(
+                        HttpGetResult.Outcome.SUCCESS,
+                        200,
+                        Duration.ofMillis(5)));
+        when(store.complete(work)).thenReturn(Completion.FINISHED);
+
+        processor.process(21L);
+
+        verify(httpGet).get("https://allowed.example/orders");
+        verify(store).complete(work);
+        verify(store, never()).fail(work, "HTTP status 200");
     }
 
     @Test
@@ -213,6 +232,18 @@ class WorkflowExecutionProcessorTest {
 
         verify(store).complete(first);
         verify(store).complete(second);
+    }
+
+    private static StepWork httpWork(String method, String url) {
+        return new StepWork(
+                21L,
+                8L,
+                "Send HTTP Request",
+                StepType.HTTP_REQUEST,
+                Map.of("method", method, "url", url),
+                Map.of("orderId", 123),
+                "attempt-1",
+                1);
     }
 
     private static StepWork validationWork(

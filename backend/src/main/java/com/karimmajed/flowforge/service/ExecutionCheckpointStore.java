@@ -11,6 +11,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -18,6 +19,8 @@ import java.util.UUID;
 
 @Service
 public class ExecutionCheckpointStore {
+
+    public static final Duration LEASE = Duration.ofMinutes(2);
 
     static final String NO_STEPS = "Workflow contains no steps";
 
@@ -239,13 +242,14 @@ public class ExecutionCheckpointStore {
                 )
                 VALUES (
                     ?, ?, 'RUNNING', ?, ?,
-                    CURRENT_TIMESTAMP + INTERVAL '2 minutes'
+                    CURRENT_TIMESTAMP + (? * INTERVAL '1 second')
                 )
                 """,
                 executionId,
                 step.id(),
                 token,
-                attemptNumber);
+                attemptNumber,
+                LEASE.toSeconds());
 
         return Claim.step(new StepWork(
                 executionId,

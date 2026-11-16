@@ -1,8 +1,11 @@
 package com.karimmajed.flowforge.http;
 
+import com.karimmajed.flowforge.service.ExecutionCheckpointStore;
 import com.karimmajed.flowforge.validation.StepConfigurationValidator;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
@@ -17,9 +20,16 @@ import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
 
 /**
- * Standalone HTTPS GET client. Workflow execution does not call this yet.
+ * HTTPS GET client used by workflow HTTP_REQUEST steps.
  *
  * <p>Destinations are default-deny. {@code httpbin.org} is reachable only
  * when {@code flowforge.http-get.allowed-hosts} lists that exact host.
@@ -46,12 +56,21 @@ public class HttpsGetExecutor {
             "internal"
     );
 
+    private static final Duration LEASE_MARGIN = Duration.ofSeconds(15);
+
+    private static final ExecutorService LOOKUPS = Executors.newCachedThreadPool(runnable -> {
+        Thread thread = new Thread(runnable, "flowforge-http-get-dns");
+        thread.setDaemon(true);
+        return thread;
+    });
+
     private final HttpGetProperties properties;
 
     private final RestClient restClient;
 
     private final AddressLookup addressLookup;
 
+    @Autowired
     public HttpsGetExecutor(HttpGetProperties properties) {
         this(
                 properties,
@@ -77,9 +96,36 @@ public class HttpsGetExecutor {
                     "HTTP GET timeouts and the response cap must be positive");
         }
 
+        Duration budget = properties.getConnectTimeout()
+                .plus(properties.getConnectTimeout())
+                .plus(properties.getRequestTimeout());
+        Duration limit = ExecutionCheckpointStore.LEASE.minus(LEASE_MARGIN);
+
+        if (budget.compareTo(limit) > 0) {
+            throw new IllegalArgumentException(
+                    "HTTP GET DNS, connect, and request timeouts must finish before the step lease");
+        }
+
         this.properties = properties;
         this.restClient = restClient;
         this.addressLookup = addressLookup;
+    }
+
+    public static HttpsGetExecutor withTransport(
+            HttpGetProperties properties,
+            ClientHttpRequestFactory transport,
+            Function<String, InetAddress[]> lookup) {
+
+        return new HttpsGetExecutor(
+                properties,
+                RestClient.builder().requestFactory(transport).build(),
+                host -> {
+                    InetAddress[] addresses = lookup.apply(host);
+                    if (addresses == null) {
+                        throw new UnknownHostException(host);
+                    }
+                    return addresses;
+                });
     }
 
     public HttpGetResult get(String url) {
@@ -101,6 +147,10 @@ public class HttpsGetExecutor {
 
         if (screen == Screen.NETWORK) {
             return network(started);
+        }
+
+        if (screen == Screen.TIMEOUT) {
+            return timeout(started);
         }
 
         try {
@@ -174,8 +224,16 @@ public class HttpsGetExecutor {
             return Screen.BLOCKED;
         }
 
+        return resolve(host);
+    }
+
+    private Screen resolve(String host) {
+        Future<InetAddress[]> future = LOOKUPS.submit(() -> addressLookup.resolve(host));
+
         try {
-            InetAddress[] addresses = addressLookup.resolve(host);
+            InetAddress[] addresses = future.get(
+                    properties.getConnectTimeout().toMillis(),
+                    TimeUnit.MILLISECONDS);
 
             if (addresses == null || addresses.length == 0) {
                 return Screen.NETWORK;
@@ -188,11 +246,25 @@ public class HttpsGetExecutor {
                 }
             }
 
-        } catch (UnknownHostException ex) {
+            return Screen.ALLOWED;
+
+        } catch (TimeoutException ex) {
+            future.cancel(true);
+            return Screen.TIMEOUT;
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            future.cancel(true);
+            return Screen.TIMEOUT;
+        } catch (ExecutionException ex) {
+            future.cancel(true);
+            if (ex.getCause() instanceof UnknownHostException) {
+                return Screen.NETWORK;
+            }
+            if (ex.getCause() instanceof RuntimeException runtime) {
+                throw runtime;
+            }
             return Screen.NETWORK;
         }
-
-        return Screen.ALLOWED;
     }
 
     private boolean isAllowlisted(String host) {
@@ -326,7 +398,8 @@ public class HttpsGetExecutor {
     private enum Screen {
         ALLOWED,
         BLOCKED,
-        NETWORK
+        NETWORK,
+        TIMEOUT
     }
 }
 
