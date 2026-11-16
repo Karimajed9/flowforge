@@ -60,3 +60,10 @@ flowforge:
   recovery:
     enabled: ${FLOWFORGE_RECOVERY_ENABLED:false}
     token: ${FLOWFORGE_RECOVERY_TOKEN:}
+
+  http-get:
+    connect-timeout: 2s
+    request-timeout: 5s
+    max-response-bytes: 65536
+    # Default deny. Add httpbin.org here only for an explicit local test.
+    allowed-hosts: []

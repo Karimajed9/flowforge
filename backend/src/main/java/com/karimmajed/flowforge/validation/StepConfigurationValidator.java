@@ -186,7 +186,7 @@ public class StepConfigurationValidator {
         }
     }
 
-    static boolean isUnsafeAddress(InetAddress address) {
+    public static boolean isUnsafeAddress(InetAddress address) {
 
         // Reject standard non-public address categories.
         if (address.isAnyLocalAddress()
