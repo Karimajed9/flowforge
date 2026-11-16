@@ -1,12 +1,28 @@
 import { renderToString } from 'react-dom/server'
+import { MemoryRouter } from 'react-router'
 import { expect, test } from 'vitest'
-import App from './App.tsx'
+import { AppRoutes } from './App.tsx'
 
-test('starter page renders the counter and docs links', () => {
-  const html = renderToString(<App />)
+test('overview route renders the dashboard shell', () => {
+  const html = renderToString(
+    <MemoryRouter initialEntries={['/']}>
+      <AppRoutes />
+    </MemoryRouter>,
+  )
 
-  expect(html).toContain('Get started')
-  expect(html).toMatch(/<button[^>]*class="counter"[^>]*>Count is\s*(<!-- -->)?0<\/button>/)
-  expect(html).toContain('href="https://vite.dev/"')
-  expect(html).toContain('href="https://react.dev/"')
+  expect(html).toContain('FLOWFORGE')
+  expect(html).toContain('Overview')
+  expect(html).toContain('href="/workflows"')
+  expect(html).toContain('href="/executions"')
+})
+
+test('unknown routes render the not found page', () => {
+  const html = renderToString(
+    <MemoryRouter initialEntries={['/missing']}>
+      <AppRoutes />
+    </MemoryRouter>,
+  )
+
+  expect(html).toContain('Page not found')
+  expect(html).toContain('href="/"')
 })
