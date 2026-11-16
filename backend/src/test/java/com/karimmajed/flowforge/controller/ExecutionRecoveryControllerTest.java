@@ -1,0 +1,85 @@
+package com.karimmajed.flowforge.controller;
+
+import com.karimmajed.flowforge.service.ExecutionRecoveryService;
+
+import org.junit.jupiter.api.Test;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.http.HttpStatus;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.server.ResponseStatusException;
+
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@WebMvcTest(
+        controllers = ExecutionRecoveryController.class,
+        properties = {
+                "flowforge.recovery.enabled=true",
+                "flowforge.recovery.token=test-recovery-key"
+        }
+)
+class ExecutionRecoveryControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockitoBean
+    private ExecutionRecoveryService service;
+
+    @Test
+    void matchingKeyQueuesRecovery() throws Exception {
+        mockMvc.perform(post("/api/admin/executions/{id}/recover", 21)
+                        .header("X-Recovery-Key", "test-recovery-key"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.executionId").value(21))
+                .andExpect(jsonPath("$.message")
+                        .value("Recovery queued through transactional outbox"));
+
+        verify(service).requestRecovery(21L);
+    }
+
+    @Test
+    void missingKeyIsForbidden() throws Exception {
+        mockMvc.perform(post("/api/admin/executions/{id}/recover", 21))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void wrongKeyIsForbidden() throws Exception {
+        mockMvc.perform(post("/api/admin/executions/{id}/recover", 21)
+                        .header("X-Recovery-Key", "other-key"))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void conflictFromTheServiceIsReturned() throws Exception {
+        doThrow(new ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "Maximum recovery attempts reached"))
+                .when(service).requestRecovery(21L);
+
+        mockMvc.perform(post("/api/admin/executions/{id}/recover", 21)
+                        .header("X-Recovery-Key", "test-recovery-key"))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void nonNumericIdDoesNotCallTheService() throws Exception {
+        mockMvc.perform(post("/api/admin/executions/{id}/recover", "abc")
+                        .header("X-Recovery-Key", "test-recovery-key"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(service);
+    }
+}

@@ -29,6 +29,21 @@ spring:
     template:
       mandatory: true
 
+    listener:
+      simple:
+        acknowledge-mode: auto
+        default-requeue-rejected: false
+        prefetch: 1
+        concurrency: 1
+
+        retry:
+          enabled: true
+          stateless: true
+          max-retries: 2
+          initial-interval: 1s
+          multiplier: 2
+          max-interval: 5s
+
 management:
   endpoints:
     web:
@@ -41,3 +56,7 @@ flowforge:
 
   consumer:
     enabled: true
+
+  recovery:
+    enabled: ${FLOWFORGE_RECOVERY_ENABLED:false}
+    token: ${FLOWFORGE_RECOVERY_TOKEN:}

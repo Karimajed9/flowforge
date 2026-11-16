@@ -6,8 +6,9 @@ import com.karimmajed.flowforge.enums.ExecutionStatus;
 import com.karimmajed.flowforge.enums.StepType;
 import com.karimmajed.flowforge.repository.WorkflowExecutionRepository;
 import com.karimmajed.flowforge.repository.WorkflowStepRepository;
+import com.karimmajed.flowforge.exception.NonRetryableExecutionException;
 
-import org.slf4j.Logger;
+import org.slf4j.Logger;        
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,13 +42,11 @@ public class WorkflowExecutionProcessor {
             .findForProcessing(executionId)
             .orElse(null);
 
-        if (execution == null) {
-            log.error(
-                "Unknown execution ID received: {}",
-                executionId
-            );
-            return;
-        }
+            if (execution == null) {
+                throw new NonRetryableExecutionException(
+                    "Execution not found: " + executionId
+                );
+            }
 
         // Duplicate deliveries must not execute steps again.
         if (execution.getStatus() == ExecutionStatus.SUCCEEDED

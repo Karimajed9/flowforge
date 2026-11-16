@@ -5,6 +5,7 @@ import com.karimmajed.flowforge.entity.WorkflowExecution;
 import com.karimmajed.flowforge.entity.WorkflowStep;
 import com.karimmajed.flowforge.enums.ExecutionStatus;
 import com.karimmajed.flowforge.enums.StepType;
+import com.karimmajed.flowforge.exception.NonRetryableExecutionException;
 import com.karimmajed.flowforge.repository.WorkflowExecutionRepository;
 import com.karimmajed.flowforge.repository.WorkflowStepRepository;
 
@@ -171,12 +172,18 @@ class WorkflowExecutionProcessorTest {
     }
 
     @Test
-    void unknownExecutionIsIgnored() {
+    void unknownExecutionIsRejected() {
 
         when(executionRepository.findForProcessing(21L))
             .thenReturn(Optional.empty());
 
-        processor.process(21L);
+        NonRetryableExecutionException ex = assertThrows(
+            NonRetryableExecutionException.class,
+            () -> processor.process(21L)
+        );
+
+        assertThat(ex.getMessage())
+            .isEqualTo("Execution not found: 21");
 
         verifyNoInteractions(stepRepository);
     }
