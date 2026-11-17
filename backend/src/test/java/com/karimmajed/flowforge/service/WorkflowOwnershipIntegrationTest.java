@@ -371,8 +371,8 @@ class WorkflowOwnershipIntegrationTest {
         insertWorkflow("Legacy", false, null, null);
 
         authenticate("user-a", ISSUER, "flowforge.user");
-        var first = api.getAll(0, 2);
-        var second = api.getAll(1, 2);
+        var first = api.getAll(0, 2, null, null);
+        var second = api.getAll(1, 2, null, null);
         assertThat(first.getTotalElements()).isEqualTo(3);
         assertThat(first.getTotalPages()).isEqualTo(2);
         assertThat(first.getContent()).extracting(row -> row.name())
@@ -383,11 +383,74 @@ class WorkflowOwnershipIntegrationTest {
         assertThat(second.toString()).doesNotContain("B first", "B second", "Legacy");
 
         authenticate("user-b", ISSUER, "flowforge.user");
-        var beta = api.getAll(0, 2);
+        var beta = api.getAll(0, 2, null, null);
         assertThat(beta.getTotalElements()).isEqualTo(2);
         assertThat(beta.getContent()).extracting(row -> row.name())
                 .containsExactly("B second", "B first");
         assertThat(beta.toString()).doesNotContain("A newest", "A oldest", "Legacy");
+    }
+
+    @Test
+    void searchMatchesNameWithoutCaseAndExactIdInsideTheOwner() {
+        var alpha = workflows.create(new CreateWorkflowRequest("Alpha Launch", null), USER_A);
+        var beta = workflows.create(new CreateWorkflowRequest("beta notes", null), USER_A);
+        var numbered = workflows.create(new CreateWorkflowRequest("Other", null), USER_A);
+        var percent = workflows.create(new CreateWorkflowRequest("100%", null), USER_A);
+        workflows.updateStatus(beta.id(), new UpdateWorkflowStatusRequest(true), USER_A);
+        workflows.create(new CreateWorkflowRequest("Alpha Hidden", null), USER_B);
+        workflows.create(new CreateWorkflowRequest("Search one", null), USER_A);
+        workflows.create(new CreateWorkflowRequest("Search two", null), USER_A);
+        workflows.create(new CreateWorkflowRequest("Search three", null), USER_A);
+
+        assertThat(workflows.getPage(0, 20, "ALPHA", null, USER_A).getContent())
+                .extracting(row -> row.name())
+                .contains("Alpha Launch")
+                .doesNotContain("Alpha Hidden", "beta notes");
+        assertThat(workflows.getPage(0, 20, "alpha", null, USER_B).getContent())
+                .extracting(row -> row.name())
+                .containsExactly("Alpha Hidden");
+
+        assertThat(workflows.getPage(0, 20, String.valueOf(numbered.id()), null, USER_A).getContent())
+                .extracting(row -> row.id())
+                .contains(numbered.id());
+        assertThat(workflows.getPage(0, 20, String.valueOf(numbered.id()), null, USER_B).getTotalElements())
+                .isZero();
+
+        assertThat(workflows.getPage(0, 20, "%", null, USER_A).getContent())
+                .extracting(row -> row.name())
+                .doesNotContain("Alpha Launch", "beta notes", "Other");
+        assertThat(workflows.getPage(0, 20, "100%", null, USER_A).getContent())
+                .extracting(row -> row.name())
+                .containsExactly("100%");
+        workflows.create(new CreateWorkflowRequest("a_b", null), USER_A);
+        workflows.create(new CreateWorkflowRequest("axb", null), USER_A);
+        assertThat(workflows.getPage(0, 20, "_", null, USER_A).getContent())
+                .extracting(row -> row.name())
+                .contains("a_b")
+                .doesNotContain("axb", "Alpha Hidden");
+
+        assertThat(workflows.getPage(0, 20, "search", true, USER_A).getTotalElements()).isZero();
+        assertThat(workflows.getPage(0, 20, null, true, USER_A).getContent())
+                .extracting(row -> row.name())
+                .containsExactly("beta notes");
+        assertThat(workflows.getPage(0, 20, null, false, USER_A).getContent())
+                .extracting(row -> row.name())
+                .doesNotContain("beta notes")
+                .contains("Alpha Launch", "Other", "100%", "Search one");
+
+        var first = workflows.getPage(0, 2, "search", null, USER_A);
+        var second = workflows.getPage(1, 2, "search", null, USER_A);
+        assertThat(first.getTotalElements()).isEqualTo(3);
+        assertThat(first.getTotalPages()).isEqualTo(2);
+        assertThat(first.getContent()).extracting(row -> row.name())
+                .containsExactly("Search three", "Search two");
+        assertThat(second.getContent()).extracting(row -> row.name())
+                .containsExactly("Search one");
+        assertThat(first.toString()).doesNotContain("Alpha Hidden");
+        assertThat(workflows.getPage(0, 20, "missing-name", null, USER_A).getTotalElements())
+                .isZero();
+
+        assertThat(alpha.id()).isNotEqualTo(percent.id());
     }
 
     @Test
@@ -447,7 +510,7 @@ class WorkflowOwnershipIntegrationTest {
         WorkflowExecutionController executionsApi = executionsApi();
         DashboardController dashboardApi = new DashboardController(reads, new CurrentCaller());
 
-        assertThat(workflowsApi.getAll(0, 20).getTotalElements()).isZero();
+        assertThat(workflowsApi.getAll(0, 20, null, null).getTotalElements()).isZero();
         assertNotFound(() -> workflowsApi.getById(created.id()), "Workflow not found");
         assertNotFound(
                 () -> workflowsApi.updateStatus(
@@ -484,8 +547,8 @@ class WorkflowOwnershipIntegrationTest {
         WorkflowStepController stepsApi = new WorkflowStepController(steps, new CurrentCaller());
         WorkflowExecutionController executionsApi = executionsApi();
 
-        assertThat(workflowsApi.getAll(0, 20).getTotalElements()).isEqualTo(1);
-        assertThat(workflowsApi.getAll(0, 20).getContent())
+        assertThat(workflowsApi.getAll(0, 20, null, null).getTotalElements()).isEqualTo(1);
+        assertThat(workflowsApi.getAll(0, 20, null, null).getContent())
                 .extracting(row -> row.name())
                 .containsExactly("Alpha");
         assertNotFound(() -> workflowsApi.getById(legacyWorkflow), "Workflow not found");
@@ -540,7 +603,7 @@ class WorkflowOwnershipIntegrationTest {
         authenticate("user-a", ISSUER, "flowforge.user");
         assertThat(workflowsApi().getById(created.id()).name()).isEqualTo("From token");
         assertNotFound(() -> workflowsApi().getById(other.id()), "Workflow not found");
-        assertThat(workflowsApi().getAll(0, 20).getContent())
+        assertThat(workflowsApi().getAll(0, 20, null, null).getContent())
                 .extracting(row -> row.name())
                 .containsExactly("From token");
     }

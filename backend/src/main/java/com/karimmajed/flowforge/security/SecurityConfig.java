@@ -38,6 +38,7 @@ import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.SimpleUrlAuthenticationSuccessHandler;
 import org.springframework.security.web.authentication.logout.LogoutSuccessHandler;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
@@ -55,11 +56,12 @@ import java.util.Map;
 /**
  * Two browser-facing modes stay active during the move to a BFF.
  *
- * A request with Authorization: Bearer uses the stateless resource server.
- * That is the mode the current React login still uses. Ownership and role
- * checks still run. CSRF is not applied on that chain because a browser
- * does not attach the Authorization header by itself, so a third-party site
- * cannot ride a bearer call the way it can ride a cookie.
+ * A request with Authorization: Bearer and no session cookie uses the
+ * stateless resource server. Ownership and role checks still run. CSRF is
+ * not applied on that chain because a browser does not attach the header
+ * by itself. A request that already has the session cookie stays on the
+ * session chain, so a foreign bearer cannot skip CSRF or replace the
+ * session identity.
  *
  * Every other request uses the session chain. The browser holds only an
  * opaque session cookie. Access, refresh, and ID tokens stay in that
@@ -140,7 +142,8 @@ public class SecurityConfig {
                 .oauth2Login(oauth -> oauth
                         .clientRegistrationRepository(clients)
                         .authorizedClientRepository(authorizedClients)
-                        .userInfoEndpoint(userInfo -> userInfo.oidcUserService(oidcUsers)))
+                        .userInfoEndpoint(userInfo -> userInfo.oidcUserService(oidcUsers))
+                        .successHandler(loginSuccess()))
                 .logout(logout -> logout
                         .logoutUrl("/api/auth/logout")
                         .logoutSuccessHandler(oidcLogout(clients)))
@@ -185,6 +188,19 @@ public class SecurityConfig {
                 .anyRequest().denyAll();
     }
 
+    /**
+     * After Keycloak returns to the callback, land on the app root. The host
+     * is whatever served the callback, so the Vite proxy stays on
+     * localhost:5173 and a direct API host stays on that host. Always using
+     * this target avoids sending the browser back to the login redirect.
+     */
+    private static SimpleUrlAuthenticationSuccessHandler loginSuccess() {
+        SimpleUrlAuthenticationSuccessHandler handler =
+                new SimpleUrlAuthenticationSuccessHandler("/");
+        handler.setAlwaysUseDefaultTargetUrl(true);
+        return handler;
+    }
+
     private static LogoutSuccessHandler oidcLogout(ClientRegistrationRepository clients) {
         OidcClientInitiatedLogoutSuccessHandler logout =
                 new OidcClientInitiatedLogoutSuccessHandler(clients);
@@ -209,7 +225,7 @@ public class SecurityConfig {
     @Bean
     CookieSerializer sessionCookieSerializer() {
         DefaultCookieSerializer serializer = new DefaultCookieSerializer();
-        serializer.setCookieName("SESSION");
+        serializer.setCookieName(BearerAuthorizationMatcher.SESSION_COOKIE);
         serializer.setUseHttpOnlyCookie(true);
         serializer.setUseBase64Encoding(false);
         serializer.setSameSite("Lax");

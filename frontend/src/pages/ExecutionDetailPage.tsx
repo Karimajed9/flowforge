@@ -1,8 +1,12 @@
 import { Link, useParams } from 'react-router'
 import { useExecutionDetails } from '../api/hooks.ts'
+import { useRetained } from '../api/useRetained.ts'
 import { EmptyState } from '../components/EmptyState.tsx'
-import { ErrorState } from '../components/ErrorState.tsx'
 import { LoadingState } from '../components/LoadingState.tsx'
+import { MissingResource } from '../components/MissingResource.tsx'
+import { executionNotFound } from '../components/notFoundCopy.ts'
+import { RequestError } from '../components/RequestError.tsx'
+import { StableRegion } from '../components/StableRegion.tsx'
 import { StatusBadge } from '../components/StatusBadge.tsx'
 import { formatTimestamp, positiveId } from '../lib/format.ts'
 import type { ExecutionStep } from '../types/stepHistory.ts'
@@ -12,51 +16,50 @@ export function ExecutionDetailPage() {
   const params = useParams()
   const executionId = positiveId(params.id ?? null)
   const details = useExecutionDetails(executionId)
+  const retained = useRetained(details.state)
 
   if (executionId === null) {
-    return <ErrorState message="Execution id must be a positive number." />
-  }
-
-  if (details.state.kind === 'loading') {
-    return <LoadingState label="Loading execution" />
-  }
-
-  if (details.state.kind === 'error' && details.state.status === 404) {
     return (
-      <EmptyState
-        title="Execution not found"
-        description={details.state.message}
-        action={
-          <button
-            type="button"
-            onClick={details.retry}
-            className="rounded-lg bg-teal-500 px-4 py-2 text-sm font-semibold text-navy-950 hover:bg-teal-400"
-          >
-            Refresh
-          </button>
-        }
-      />
+      <StableRegion testId="execution-detail">
+        <MissingExecution />
+      </StableRegion>
     )
   }
 
-  if (details.state.kind === 'error') {
-    return (
-      <ErrorState message={details.state.message} onRetry={details.retry} />
-    )
-  }
-
-  if (details.state.kind !== 'ready') {
-    return null
-  }
-
-  const { execution, steps } = details.state.data
+  const execution = retained.data?.execution
+  const steps = retained.data?.steps
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-6">
-      <ExecutionSummary execution={execution} onRefresh={details.retry} />
-      <StepHistory steps={steps} />
-    </div>
+    <StableRegion busy={retained.loading} testId="execution-detail">
+      {retained.loading && !retained.data ? (
+        <LoadingState label="Loading execution" />
+      ) : null}
+      {retained.loading && retained.data ? (
+        <p className="sr-only" role="status">
+          Loading execution
+        </p>
+      ) : null}
+      {details.state.kind === 'error' ? (
+        <RequestError
+          status={details.state.status}
+          message={details.state.message}
+          onRetry={details.retry}
+          notFound={executionNotFound}
+          denied="You don't have access to this execution."
+        />
+      ) : null}
+      {details.state.kind !== 'error' && execution && steps ? (
+        <div className="mx-auto flex max-w-5xl flex-col gap-6">
+          <ExecutionSummary execution={execution} onRefresh={details.retry} />
+          <StepHistory steps={steps} />
+        </div>
+      ) : null}
+    </StableRegion>
   )
+}
+
+function MissingExecution() {
+  return <MissingResource {...executionNotFound} />
 }
 
 function ExecutionSummary({

@@ -16,6 +16,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.Locale;
+
 @Service
 public class WorkflowService {
 
@@ -41,14 +43,46 @@ public class WorkflowService {
 
     @Transactional(readOnly = true)
     public Page<WorkflowResponse> getPage(int page, int size, ResourceOwner owner) {
+        return getPage(page, size, null, null, owner);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<WorkflowResponse> getPage(
+            int page,
+            int size,
+            String query,
+            Boolean active,
+            ResourceOwner owner) {
+
+        PageRequest pageable = pageRequest(page, size);
+        String normalized = normalizeQuery(query);
+        if (normalized == null && active == null) {
+            return repository
+                .findByOwnerSubjectAndOwnerIssuer(owner.subject(), owner.issuer(), pageable)
+                .map(WorkflowResponse::from);
+        }
+
+        String activeFilter = active == null ? "all" : active ? "active" : "inactive";
+        Long workflowId = exactId(normalized);
+        return repository
+            .searchOwned(
+                owner.subject(),
+                owner.issuer(),
+                activeFilter,
+                namePattern(normalized),
+                workflowId == null ? 0L : workflowId,
+                pageable)
+            .map(WorkflowResponse::from);
+    }
+
+    private static PageRequest pageRequest(int page, int size) {
         if (page < 0 || size < 1 || size > 100) {
             throw new ResponseStatusException(
                 HttpStatus.BAD_REQUEST,
                 "Page must be >= 0 and size must be between 1 and 100"
             );
         }
-
-        PageRequest pageable = PageRequest.of(
+        return PageRequest.of(
             page,
             size,
             Sort.by(
@@ -56,10 +90,45 @@ public class WorkflowService {
                 Sort.Order.desc("id")
             )
         );
+    }
 
-        return repository
-            .findByOwnerSubjectAndOwnerIssuer(owner.subject(), owner.issuer(), pageable)
-            .map(WorkflowResponse::from);
+    private static String normalizeQuery(String query) {
+        if (query == null) {
+            return null;
+        }
+        String trimmed = query.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        if (trimmed.length() > 150) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "Search must be at most 150 characters"
+            );
+        }
+        return trimmed;
+    }
+
+    private static Long exactId(String query) {
+        if (query == null || !query.matches("[1-9]\\d{0,18}")) {
+            return null;
+        }
+        try {
+            return Long.parseLong(query);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private static String namePattern(String query) {
+        if (query == null) {
+            return "";
+        }
+        String escaped = query
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_");
+        return "%" + escaped.toLowerCase(Locale.ROOT) + "%";
     }
 
     @Transactional(readOnly = true)

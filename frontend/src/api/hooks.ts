@@ -8,8 +8,15 @@ import {
 } from './client.ts'
 import { useLoad } from './useLoad.ts'
 
-export function useWorkflowList(page: number) {
-  return useLoad(`workflows:${page}`, (signal) => listWorkflows(page, signal))
+export function useWorkflowList(
+  page: number,
+  query: string,
+  active: boolean | null,
+) {
+  const filter = active === null ? 'all' : String(active)
+  return useLoad(`workflows:${page}:${query}:${filter}`, (signal) =>
+    listWorkflows(page, query, active, signal),
+  )
 }
 
 export function useDashboardOverview() {

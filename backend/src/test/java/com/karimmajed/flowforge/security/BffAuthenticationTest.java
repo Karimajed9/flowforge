@@ -120,7 +120,13 @@ class BffAuthenticationTest {
     @Test
     void authorizationRequestUsesPkceAndKeepsTheSecretOnTheServer() throws Exception {
         MvcResult result = mockMvc.perform(get("/oauth2/authorization/keycloak")
-                        .with(TestAccess.clearAuthentication()))
+                        .with(TestAccess.clearAuthentication())
+                        .with(request -> {
+                            request.setScheme("http");
+                            request.setServerName("localhost");
+                            request.setServerPort(5173);
+                            return request;
+                        }))
                 .andExpect(status().isFound())
                 .andReturn();
 
@@ -129,6 +135,8 @@ class BffAuthenticationTest {
         assertThat(location).contains("response_type=code");
         assertThat(location).contains("code_challenge=");
         assertThat(location).contains("code_challenge_method=S256");
+        assertThat(location).contains(
+                "redirect_uri=http://localhost:5173/login/oauth2/code/keycloak");
         assertThat(location).doesNotContain("client_secret");
         assertThat(location).doesNotContain("test-client-secret");
         assertThat(location).doesNotContain("access_token");
@@ -305,6 +313,54 @@ class BffAuthenticationTest {
     }
 
     @Test
+    void sessionCookieDoesNotLetAForeignBearerSkipCsrfOrOwnership() throws Exception {
+        when(workflows.create(any(), any())).thenReturn(workflow());
+        String foreign = TestAccess.signedToken(
+                TestAccess.ISSUER,
+                TestAccess.AUDIENCE,
+                "flowforge.user");
+        Cookie session = new Cookie(BearerAuthorizationMatcher.SESSION_COOKIE, "opaque-session-id");
+        RequestPostProcessor user = sessionUser("session-user", "Ada", SecurityConfig.USER);
+
+        mockMvc.perform(post("/api/workflows")
+                        .with(user)
+                        .cookie(session)
+                        .header("Authorization", "Bearer " + foreign)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Owned\"}"))
+                .andExpect(status().isForbidden());
+        verifyNoInteractions(workflows);
+
+        GrantedCsrf csrf = grantedCsrf();
+        MvcResult result = mockMvc.perform(post("/api/workflows")
+                        .with(user)
+                        .cookie(session, csrf.cookie())
+                        .header("Authorization", "Bearer " + foreign)
+                        .header(csrf.headerName(), csrf.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Owned\",\"ownerSubject\":\"someone-else\"}"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        assertThat(result.getResponse().getContentAsString()).doesNotContain(foreign);
+        verify(workflows).create(any(), eq(new ResourceOwner("session-user", TestAccess.ISSUER)));
+    }
+
+    @Test
+    void rawCsrfParameterAuthorizesACookieStateChange() throws Exception {
+        when(workflows.create(any(), any())).thenReturn(workflow());
+        GrantedCsrf csrf = grantedCsrf();
+
+        mockMvc.perform(post("/api/workflows")
+                        .with(sessionUser("session-user", "Ada", SecurityConfig.USER))
+                        .cookie(csrf.cookie())
+                        .param(csrf.parameterName(), csrf.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Owned\"}"))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
     void logoutEndsTheKeycloakSessionWithoutReturningTokens() throws Exception {
         GrantedCsrf csrf = grantedCsrf();
         MvcResult result = mockMvc.perform(post("/api/auth/logout")
@@ -336,9 +392,10 @@ class BffAuthenticationTest {
         String body = result.getResponse().getContentAsString();
         String token = com.jayway.jsonpath.JsonPath.read(body, "$.token");
         String headerName = com.jayway.jsonpath.JsonPath.read(body, "$.headerName");
+        String parameterName = com.jayway.jsonpath.JsonPath.read(body, "$.parameterName");
         Cookie cookie = result.getResponse().getCookie("XSRF-TOKEN");
         assertThat(cookie).isNotNull();
-        return new GrantedCsrf(headerName, token, cookie);
+        return new GrantedCsrf(headerName, parameterName, token, cookie);
     }
 
     private static RequestPostProcessor sessionUser(String subject, String username, String... authorities) {
@@ -388,6 +445,10 @@ class BffAuthenticationTest {
                 OffsetDateTime.parse("2026-11-16T15:04:00Z"));
     }
 
-    private record GrantedCsrf(String headerName, String token, Cookie cookie) {
+    private record GrantedCsrf(
+            String headerName,
+            String parameterName,
+            String token,
+            Cookie cookie) {
     }
 }

@@ -98,7 +98,7 @@ test('workflow list shows saved workflows and their ids', async () => {
 
   const link = await screen.findByRole('link', { name: 'Onboarding' })
   expect(link.getAttribute('href')).toBe('/workflows/4')
-  expect(screen.getByText('Inactive')).toBeTruthy()
+  expect(link.closest('li')?.textContent).toContain('Inactive')
   expect(screen.getByText('4')).toBeTruthy()
   expect(screen.getByRole('link', { name: 'Open workflow' }).getAttribute('href')).toBe(
     '/workflows/4',

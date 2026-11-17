@@ -122,7 +122,15 @@ test('a missing execution is a not-found state', async () => {
   expect(
     await screen.findByRole('heading', { name: 'Execution not found' }),
   ).toBeTruthy()
-  expect(screen.getAllByText('Execution not found').length).toBeGreaterThan(0)
+  expect(
+    screen.getByText("This execution doesn't exist, or you don't have access to it."),
+  ).toBeTruthy()
+  expect(screen.getByRole('link', { name: 'Back to Executions' }).getAttribute('href')).toBe(
+    '/executions',
+  )
+  expect(screen.getAllByText('Execution not found')).toHaveLength(1)
+  expect(screen.queryByText('Request failed (404)')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
   expect(screen.queryByRole('heading', { name: 'Something went wrong' })).toBeNull()
 })
 

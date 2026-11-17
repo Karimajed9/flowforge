@@ -40,9 +40,18 @@ public class WorkflowController {
     @GetMapping
     public Page<WorkflowResponse> getAll(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) Boolean active) {
 
-        return service.getPage(page, size, caller.require());
+        String query = q == null ? null : q.trim();
+        if (query != null && query.isEmpty()) {
+            query = null;
+        }
+        if (query == null && active == null) {
+            return service.getPage(page, size, caller.require());
+        }
+        return service.getPage(page, size, query, active, caller.require());
     }
 
     @GetMapping("/{id}")
