@@ -19,6 +19,7 @@ import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -94,5 +95,30 @@ class WorkflowControllerTest {
 
         mockMvc.perform(get("/api/workflows").param("size", "101"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void getWorkflowsPassesNameSearchAndActiveFilter() throws Exception {
+        when(service.getPage(eq(1), eq(20), eq("Alpha"), eq(false), any(ResourceOwner.class)))
+                .thenReturn(new PageImpl<>(List.of(), PageRequest.of(1, 20), 0));
+
+        mockMvc.perform(get("/api/workflows")
+                        .param("page", "1")
+                        .param("q", "  Alpha  ")
+                        .param("active", "false"))
+                .andExpect(status().isOk());
+
+        verify(service).getPage(eq(1), eq(20), eq("Alpha"), eq(false), any(ResourceOwner.class));
+    }
+
+    @Test
+    void getWorkflowsPassesAnActiveFilterWithoutAQuery() throws Exception {
+        when(service.getPage(eq(0), eq(20), isNull(), eq(true), any(ResourceOwner.class)))
+                .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
+
+        mockMvc.perform(get("/api/workflows").param("active", "true"))
+                .andExpect(status().isOk());
+
+        verify(service).getPage(eq(0), eq(20), isNull(), eq(true), any(ResourceOwner.class));
     }
 }

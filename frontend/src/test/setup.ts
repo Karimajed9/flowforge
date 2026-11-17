@@ -1,16 +1,33 @@
 import { vi } from 'vitest'
 
-// Page tests render the signed-in shell. The string is not an identity-provider token.
+// Page tests render a signed-in user. This profile is not an access token.
 vi.mock('../auth/session.ts', () => ({
-  getAccessToken: vi.fn(async () => {
-    if (typeof window === 'undefined') {
-      return null
-    }
-    return 'test-access-token'
-  }),
+  loadProfile: vi.fn(async () => ({
+    subject: 'user',
+    issuer: 'http://auth.test/realms/flowforge',
+    username: 'Ada',
+    permissions: ['flowforge.user'],
+  })),
   subscribe: () => () => {},
-  signIn: vi.fn(async () => {}),
+  signIn: vi.fn(),
   signOut: vi.fn(async () => {}),
-  clearSession: vi.fn(async () => {}),
-  completeSignIn: vi.fn(async () => {}),
+  noteSignedOut: vi.fn(),
+  isAdmin: (profile: { permissions?: string[] } | null | undefined) =>
+    Array.isArray(profile?.permissions) &&
+    profile.permissions.includes('flowforge.admin'),
+}))
+
+vi.mock('../auth/csrf.ts', () => ({
+  csrfHeaders: vi.fn(async () => ({ 'X-XSRF-TOKEN': 'test-csrf' })),
+  clearCsrf: vi.fn(),
+  refreshCsrf: vi.fn(async () => ({
+    headerName: 'X-XSRF-TOKEN',
+    parameterName: '_csrf',
+    token: 'test-csrf',
+  })),
+  currentCsrf: vi.fn(async () => ({
+    headerName: 'X-XSRF-TOKEN',
+    parameterName: '_csrf',
+    token: 'test-csrf',
+  })),
 }))

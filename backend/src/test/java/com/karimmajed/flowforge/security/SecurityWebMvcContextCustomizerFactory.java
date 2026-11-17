@@ -21,7 +21,8 @@ public class SecurityWebMvcContextCustomizerFactory implements ContextCustomizer
             return null;
         }
         boolean defaultUser = testClass != ApiSecurityTest.class
-                && testClass != IssuerUnavailableSecurityTest.class;
+                && testClass != IssuerUnavailableSecurityTest.class
+                && testClass != BffAuthenticationTest.class;
         return (context, mergedConfig) -> {
             if (context instanceof GenericApplicationContext generic) {
                 AnnotatedBeanDefinitionReader reader = new AnnotatedBeanDefinitionReader(generic);

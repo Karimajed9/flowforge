@@ -1,8 +1,10 @@
 import { Link, useSearchParams } from 'react-router'
 import { useDashboardOverview, useRecentExecutions } from '../api/hooks.ts'
+import { useRetained } from '../api/useRetained.ts'
 import { EmptyState } from '../components/EmptyState.tsx'
 import { ErrorState } from '../components/ErrorState.tsx'
 import { LoadingState } from '../components/LoadingState.tsx'
+import { StableRegion } from '../components/StableRegion.tsx'
 import { StatusBadge } from '../components/StatusBadge.tsx'
 import { formatTimestamp, pageIndex } from '../lib/format.ts'
 import type { DashboardOverview, RecentExecution } from '../types/dashboard.ts'
@@ -13,6 +15,8 @@ export function OverviewPage() {
   const page = pageIndex(searchParams.get('page'))
   const overview = useDashboardOverview()
   const recent = useRecentExecutions(page)
+  const overviewView = useRetained(overview.state)
+  const recentView = useRetained(recent.state)
 
   function setPage(next: number) {
     const updated = new URLSearchParams(searchParams)
@@ -65,28 +69,40 @@ export function OverviewPage() {
         </div>
       </section>
 
-      {overview.state.kind === 'loading' ? (
-        <LoadingState label="Loading overview" />
-      ) : null}
-      {overview.state.kind === 'error' ? (
-        <ErrorState message={overview.state.message} onRetry={overview.retry} />
-      ) : null}
-      {overview.state.kind === 'ready' ? (
-        <OverviewStats overview={overview.state.data} />
-      ) : null}
+      <StableRegion
+        busy={overviewView.loading || recentView.loading}
+        testId="overview-results"
+      >
+        {overviewView.loading && !overviewView.data ? (
+          <LoadingState label="Loading overview" />
+        ) : null}
+        {overviewView.loading && overviewView.data ? (
+          <p className="sr-only" role="status">
+            Loading overview
+          </p>
+        ) : null}
+        {overview.state.kind === 'error' ? (
+          <ErrorState message={overview.state.message} onRetry={overview.retry} />
+        ) : null}
+        {overview.state.kind !== 'error' && overviewView.data ? (
+          <OverviewStats overview={overviewView.data} />
+        ) : null}
 
-      {recent.state.kind === 'loading' ? (
-        <LoadingState label="Loading recent executions" />
-      ) : null}
-      {recent.state.kind === 'error' ? (
-        <ErrorState message={recent.state.message} onRetry={recent.retry} />
-      ) : null}
-      {recent.state.kind === 'ready' ? (
-        <RecentExecutions
-          page={recent.state.data}
-          onPage={setPage}
-        />
-      ) : null}
+        {recentView.loading && !recentView.data ? (
+          <LoadingState label="Loading recent executions" />
+        ) : null}
+        {recentView.loading && recentView.data ? (
+          <p className="sr-only" role="status">
+            Loading recent executions
+          </p>
+        ) : null}
+        {recent.state.kind === 'error' ? (
+          <ErrorState message={recent.state.message} onRetry={recent.retry} />
+        ) : null}
+        {recent.state.kind !== 'error' && recentView.data ? (
+          <RecentExecutions page={recentView.data} onPage={setPage} />
+        ) : null}
+      </StableRegion>
     </div>
   )
 }

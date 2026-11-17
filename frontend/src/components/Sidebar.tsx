@@ -25,7 +25,8 @@ export function Sidebar({
         />
       ) : null}
       <aside
-        className={`${open ? 'flex' : 'hidden'} fixed inset-y-0 left-0 z-40 w-64 flex-col border-r border-line bg-navy-900 lg:static lg:flex`}
+        data-testid="app-sidebar"
+        className={`${open ? 'flex' : 'hidden'} fixed inset-y-0 left-0 z-40 w-64 flex-col overflow-y-auto border-r border-line bg-navy-900 lg:static lg:flex lg:h-svh`}
       >
         <div className="flex items-center justify-between px-5 py-5">
           <div>

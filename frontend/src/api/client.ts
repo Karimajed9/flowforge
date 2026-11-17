@@ -1,4 +1,5 @@
-import { clearSession, getAccessToken } from '../auth/session.ts'
+import { clearCsrf, csrfHeaders } from '../auth/csrf.ts'
+import { noteSignedOut } from '../auth/session.ts'
 import { ApiError, isAbort } from './errors.ts'
 import {
   parseDashboardOverview,
@@ -106,20 +107,17 @@ async function request(
   if (payload !== undefined) {
     headers['Content-Type'] = 'application/json'
   }
-  // Webhook ingestion keeps its own token. Every other /api call uses the access token.
-  if (!path.startsWith('/api/webhooks')) {
-    const token = await getAccessToken()
+  if (method !== 'GET') {
+    Object.assign(headers, await csrfHeaders())
     if (signal?.aborted) {
       throw new DOMException('Aborted', 'AbortError')
-    }
-    if (token) {
-      headers.Authorization = `Bearer ${token}`
     }
   }
 
   try {
     response = await fetch(apiUrl(path), {
       method,
+      credentials: 'include',
       headers,
       body: payload === undefined ? undefined : JSON.stringify(payload),
       signal,
@@ -134,7 +132,9 @@ async function request(
   const body = await readBody(response)
 
   if (response.status === 401) {
-    await clearSession()
+    noteSignedOut()
+  } else if (response.status === 403 && method !== 'GET') {
+    clearCsrf()
   }
 
   if (!response.ok) {
@@ -157,12 +157,20 @@ const PAGE_SIZE = 20
 
 export function listWorkflows(
   page: number,
+  query: string,
+  active: boolean | null,
   signal?: AbortSignal,
 ): Promise<PageResponse<Workflow>> {
   const params = new URLSearchParams({
     page: String(page),
     size: String(PAGE_SIZE),
   })
+  if (query !== '') {
+    params.set('q', query)
+  }
+  if (active !== null) {
+    params.set('active', String(active))
+  }
   return request(`/api/workflows?${params}`, signal).then(parseWorkflowPage)
 }
 

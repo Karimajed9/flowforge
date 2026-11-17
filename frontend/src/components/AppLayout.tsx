@@ -23,21 +23,29 @@ export function AppLayout() {
   const protectedRoute = requiresAccessToken(pathname)
 
   let main = <Outlet />
-  if (protectedRoute && session === 'checking') {
+  if (protectedRoute && session.status === 'checking') {
     main = <LoadingState label="Checking sign-in" />
-  } else if (protectedRoute && session === 'out') {
+  } else if (protectedRoute && session.status === 'out') {
     main = <SignInPanel />
   }
 
   return (
-    <div className="min-h-svh bg-navy-950 text-ink lg:grid lg:grid-cols-[16rem_minmax(0,1fr)]">
+    <div className="h-svh overflow-hidden bg-navy-950 text-ink lg:grid lg:grid-cols-[16rem_minmax(0,1fr)]">
       <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
-      <div className="min-w-0">
+      <div
+        data-testid="app-content"
+        className="flex h-full min-h-0 min-w-0 flex-col overflow-y-auto [overflow-anchor:none]"
+      >
         <Header
           onMenu={() => setMenuOpen(true)}
-          signedIn={session === 'in'}
+          profile={session.status === 'in' ? session.profile : null}
         />
-        <main className="px-4 py-6 sm:px-8 sm:py-8">{main}</main>
+        <main
+          data-testid="app-main"
+          className="min-h-[calc(100svh-4.75rem)] flex-1 px-4 py-6 [overflow-anchor:none] sm:px-8 sm:py-8"
+        >
+          {main}
+        </main>
       </div>
     </div>
   )

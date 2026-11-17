@@ -1,21 +1,31 @@
 import { useEffect, useState } from 'react'
-import { getAccessToken, subscribe } from './session.ts'
+import { loadProfile, subscribe, type AuthProfile } from './session.ts'
 
-export type SessionState = 'checking' | 'in' | 'out'
+export type SessionState =
+  | { status: 'checking' }
+  | { status: 'out' }
+  | { status: 'in'; profile: AuthProfile }
 
 export function useSession(): SessionState {
   const [session, setSession] = useState<SessionState>(
-    typeof window === 'undefined' ? 'out' : 'checking',
+    typeof window === 'undefined' ? { status: 'out' } : { status: 'checking' },
   )
 
   useEffect(() => {
     let active = true
     const refresh = () => {
-      void getAccessToken().then((token) => {
-        if (active) {
-          setSession(token ? 'in' : 'out')
-        }
-      })
+      void loadProfile()
+        .then((profile) => {
+          if (!active) {
+            return
+          }
+          setSession(profile ? { status: 'in', profile } : { status: 'out' })
+        })
+        .catch(() => {
+          if (active) {
+            setSession({ status: 'out' })
+          }
+        })
     }
     refresh()
     const unsubscribe = subscribe(refresh)

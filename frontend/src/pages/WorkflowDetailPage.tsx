@@ -2,10 +2,14 @@ import { useState } from 'react'
 import { Link, useParams } from 'react-router'
 import type { WorkflowDetail } from '../api/client.ts'
 import { useWorkflowDetail } from '../api/hooks.ts'
+import { useRetained } from '../api/useRetained.ts'
 import { CreateStepForms } from '../components/CreateStepForms.tsx'
 import { EmptyState } from '../components/EmptyState.tsx'
-import { ErrorState } from '../components/ErrorState.tsx'
 import { LoadingState } from '../components/LoadingState.tsx'
+import { MissingResource } from '../components/MissingResource.tsx'
+import { workflowNotFound } from '../components/notFoundCopy.ts'
+import { RequestError } from '../components/RequestError.tsx'
+import { StableRegion } from '../components/StableRegion.tsx'
 import { StepConfigurationSummary } from '../components/StepConfigurationSummary.tsx'
 import { WorkflowStatusControl } from '../components/WorkflowStatusControl.tsx'
 import { formatTimestamp, positiveId } from '../lib/format.ts'
@@ -15,49 +19,44 @@ export function WorkflowDetailPage() {
   const params = useParams()
   const workflowId = positiveId(params.id ?? null)
   const details = useWorkflowDetail(workflowId)
+  const retained = useRetained(details.state)
 
   if (workflowId === null) {
-    return <ErrorState message="Workflow id must be a positive number." />
-  }
-
-  if (details.state.kind === 'loading') {
-    return <LoadingState label="Loading workflow" />
-  }
-
-  if (details.state.kind === 'error' && details.state.status === 404) {
     return (
-      <EmptyState
-        title="Workflow not found"
-        description={details.state.message}
-        action={
-          <button
-            type="button"
-            onClick={details.retry}
-            className="rounded-lg bg-teal-500 px-4 py-2 text-sm font-semibold text-navy-950 hover:bg-teal-400"
-          >
-            Refresh
-          </button>
-        }
-      />
+      <StableRegion testId="workflow-detail">
+        <MissingWorkflow />
+      </StableRegion>
     )
-  }
-
-  if (details.state.kind === 'error') {
-    return (
-      <ErrorState message={details.state.message} onRetry={details.retry} />
-    )
-  }
-
-  if (details.state.kind !== 'ready') {
-    return null
   }
 
   return (
-    <WorkflowDetailContent
-      detail={details.state.data}
-      onRefresh={details.retry}
-    />
+    <StableRegion busy={retained.loading} testId="workflow-detail">
+      {retained.loading && !retained.data ? (
+        <LoadingState label="Loading workflow" />
+      ) : null}
+      {retained.loading && retained.data ? (
+        <p className="sr-only" role="status">
+          Loading workflow
+        </p>
+      ) : null}
+      {details.state.kind === 'error' ? (
+        <RequestError
+          status={details.state.status}
+          message={details.state.message}
+          onRetry={details.retry}
+          notFound={workflowNotFound}
+          denied="You don't have access to this workflow."
+        />
+      ) : null}
+      {details.state.kind !== 'error' && retained.data ? (
+        <WorkflowDetailContent detail={retained.data} onRefresh={details.retry} />
+      ) : null}
+    </StableRegion>
   )
+}
+
+function MissingWorkflow() {
+  return <MissingResource {...workflowNotFound} />
 }
 
 function WorkflowDetailContent({
