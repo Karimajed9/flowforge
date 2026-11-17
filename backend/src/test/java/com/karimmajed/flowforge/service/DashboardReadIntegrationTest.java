@@ -4,6 +4,7 @@ import com.karimmajed.flowforge.dto.DashboardOverviewResponse;
 import com.karimmajed.flowforge.dto.RecentExecutionResponse;
 import com.karimmajed.flowforge.dto.WorkflowResponse;
 import com.karimmajed.flowforge.enums.ExecutionStatus;
+import com.karimmajed.flowforge.security.ResourceOwner;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,6 +49,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 @Testcontainers
 class DashboardReadIntegrationTest {
 
+    private static final ResourceOwner OWNER = new ResourceOwner(
+            "dashboard-user",
+            "http://auth.test/realms/flowforge");
+
     private static final String PAYLOAD_SECRET = "payload-secret-value";
     private static final String IDEMPOTENCY_SECRET = "idem-secret-value";
     private static final String WEBHOOK_SECRET = "webhook-hash-secret";
@@ -82,7 +87,7 @@ class DashboardReadIntegrationTest {
 
     @Test
     void emptyDatabaseHasZeroCountsAndNoSuccessRate() {
-        DashboardOverviewResponse overview = reads.overview();
+        DashboardOverviewResponse overview = reads.overview(OWNER);
 
         assertThat(overview.totalWorkflows()).isZero();
         assertThat(overview.activeWorkflows()).isZero();
@@ -92,8 +97,8 @@ class DashboardReadIntegrationTest {
         assertThat(overview.successRate()).isNull();
         assertThat(overview.windowDays())
                 .isEqualTo(DashboardReadService.SUCCESS_RATE_WINDOW_DAYS);
-        assertThat(reads.recentExecutions(0, 20).getContent()).isEmpty();
-        assertThat(reads.recentExecutions(0, 20).getTotalElements()).isZero();
+        assertThat(reads.recentExecutions(0, 20, OWNER).getContent()).isEmpty();
+        assertThat(reads.recentExecutions(0, 20, OWNER).getTotalElements()).isZero();
     }
 
     @Test
@@ -110,7 +115,7 @@ class DashboardReadIntegrationTest {
         long running = insertExecution(active, "RUNNING", now.minusHours(1), null);
         long received = insertExecution(active, "RECEIVED", now.minusMinutes(5), null);
 
-        DashboardOverviewResponse overview = reads.overview();
+        DashboardOverviewResponse overview = reads.overview(OWNER);
 
         assertThat(overview.totalWorkflows()).isEqualTo(2);
         assertThat(overview.activeWorkflows()).isEqualTo(1);
@@ -122,7 +127,7 @@ class DashboardReadIntegrationTest {
         assertThat(overview.toString()).doesNotContain(
                 PAYLOAD_SECRET, IDEMPOTENCY_SECRET, WEBHOOK_SECRET);
 
-        Page<RecentExecutionResponse> first = reads.recentExecutions(0, 2);
+        Page<RecentExecutionResponse> first = reads.recentExecutions(0, 2, OWNER);
         assertThat(first.getTotalElements()).isEqualTo(5);
         assertThat(first.getContent()).extracting(RecentExecutionResponse::id)
                 .containsExactly(received, running);
@@ -130,7 +135,7 @@ class DashboardReadIntegrationTest {
         assertThat(first.toString()).doesNotContain(
                 PAYLOAD_SECRET, IDEMPOTENCY_SECRET, WEBHOOK_SECRET);
 
-        Page<RecentExecutionResponse> second = reads.recentExecutions(1, 2);
+        Page<RecentExecutionResponse> second = reads.recentExecutions(1, 2, OWNER);
         assertThat(second.getNumber()).isEqualTo(1);
         assertThat(second.getContent()).extracting(RecentExecutionResponse::id)
                 .containsExactly(recentFailure, recentSuccess);
@@ -148,7 +153,7 @@ class DashboardReadIntegrationTest {
         insertExecution(workflowId, "QUEUED", now.minusMinutes(2), null);
         insertExecution(workflowId, "RUNNING", now.minusMinutes(1), null);
 
-        DashboardOverviewResponse overview = reads.overview();
+        DashboardOverviewResponse overview = reads.overview(OWNER);
 
         assertThat(overview.totalExecutions()).isEqualTo(2);
         assertThat(overview.succeededExecutions()).isZero();
@@ -163,14 +168,14 @@ class DashboardReadIntegrationTest {
         long middle = insertWorkflow("Middle", false, now.minusDays(2));
         long newest = insertWorkflow("Newest", true, now.minusDays(1));
 
-        Page<WorkflowResponse> first = workflows.getPage(0, 2);
+        Page<WorkflowResponse> first = workflows.getPage(0, 2, OWNER);
         assertThat(first.getTotalElements()).isEqualTo(3);
         assertThat(first.getTotalPages()).isEqualTo(2);
         assertThat(first.getContent()).extracting(WorkflowResponse::id)
                 .containsExactly(newest, middle);
         assertThat(first.toString()).doesNotContain(WEBHOOK_SECRET);
 
-        Page<WorkflowResponse> second = workflows.getPage(1, 2);
+        Page<WorkflowResponse> second = workflows.getPage(1, 2, OWNER);
         assertThat(second.getContent()).extracting(WorkflowResponse::name)
                 .containsExactly("Oldest");
     }
@@ -179,10 +184,10 @@ class DashboardReadIntegrationTest {
     void pageLimitsAreRejected() {
         ResponseStatusException workflowsTooLarge = assertThrows(
                 ResponseStatusException.class,
-                () -> workflows.getPage(0, 101));
+                () -> workflows.getPage(0, 101, OWNER));
         ResponseStatusException executionsNegative = assertThrows(
                 ResponseStatusException.class,
-                () -> reads.recentExecutions(-1, 20));
+                () -> reads.recentExecutions(-1, 20, OWNER));
 
         assertThat(workflowsTooLarge.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(executionsNegative.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
@@ -193,16 +198,19 @@ class DashboardReadIntegrationTest {
     private long insertWorkflow(String name, boolean active, OffsetDateTime createdAt) {
         return jdbc.queryForObject("""
                 INSERT INTO workflows (
-                    name, description, active, created_at, webhook_token_hash
+                    name, description, active, created_at, webhook_token_hash,
+                    owner_subject, owner_issuer
                 )
-                VALUES (?, NULL, ?, ?, ?)
+                VALUES (?, NULL, ?, ?, ?, ?, ?)
                 RETURNING id
                 """,
                 Long.class,
                 name,
                 active,
                 createdAt,
-                WEBHOOK_SECRET + "-" + UUID.randomUUID());
+                WEBHOOK_SECRET + "-" + UUID.randomUUID(),
+                OWNER.subject(),
+                OWNER.issuer());
     }
 
     private long insertExecution(

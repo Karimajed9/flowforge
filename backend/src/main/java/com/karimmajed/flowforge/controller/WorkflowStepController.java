@@ -1,6 +1,7 @@
 package com.karimmajed.flowforge.controller;
 
 import com.karimmajed.flowforge.dto.*;
+import com.karimmajed.flowforge.security.CurrentCaller;
 import com.karimmajed.flowforge.service.WorkflowStepService;
 
 import jakarta.validation.Valid;
@@ -14,9 +15,11 @@ import java.util.List;
 public class WorkflowStepController {
 
     private final WorkflowStepService service;
+    private final CurrentCaller caller;
 
-    public WorkflowStepController(WorkflowStepService service) {
+    public WorkflowStepController(WorkflowStepService service, CurrentCaller caller) {
         this.service = service;
+        this.caller = caller;
     }
 
     @PostMapping
@@ -26,13 +29,13 @@ public class WorkflowStepController {
 
         return ResponseEntity
             .status(HttpStatus.CREATED)
-            .body(service.create(workflowId, request));
+            .body(service.create(workflowId, request, caller.require()));
     }
 
     @GetMapping
     public List<WorkflowStepResponse> getAll(
             @PathVariable Long workflowId) {
 
-        return service.getAll(workflowId);
+        return service.getAll(workflowId, caller.require());
     }
 }

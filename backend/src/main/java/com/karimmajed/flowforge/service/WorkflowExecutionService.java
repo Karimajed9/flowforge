@@ -4,6 +4,7 @@ import com.karimmajed.flowforge.dto.WorkflowExecutionResponse;
 import com.karimmajed.flowforge.entity.WorkflowExecution;
 import com.karimmajed.flowforge.repository.WorkflowExecutionRepository;
 import com.karimmajed.flowforge.repository.WorkflowRepository;
+import com.karimmajed.flowforge.security.ResourceOwner;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -28,10 +29,11 @@ public class WorkflowExecutionService {
     }
 
     @Transactional(readOnly = true)
-    public WorkflowExecutionResponse getById(Long id) {
+    public WorkflowExecutionResponse getById(Long id, ResourceOwner owner) {
 
         WorkflowExecution execution = executionRepository
-            .findById(id)
+            .findByIdAndWorkflow_OwnerSubjectAndWorkflow_OwnerIssuer(
+                    id, owner.subject(), owner.issuer())
             .orElseThrow(() -> new ResponseStatusException(
                 HttpStatus.NOT_FOUND,
                 "Execution not found"
@@ -44,7 +46,8 @@ public class WorkflowExecutionService {
     public Page<WorkflowExecutionResponse> getByWorkflow(
             Long workflowId,
             int page,
-            int size) {
+            int size,
+            ResourceOwner owner) {
 
         if (page < 0 || size < 1 || size > 100) {
             throw new ResponseStatusException(
@@ -54,7 +57,8 @@ public class WorkflowExecutionService {
         }
 
         // Verify that the workflow exists.
-        if (!workflowRepository.existsById(workflowId)) {
+        if (!workflowRepository.existsByIdAndOwnerSubjectAndOwnerIssuer(
+                workflowId, owner.subject(), owner.issuer())) {
             throw new ResponseStatusException(
                 HttpStatus.NOT_FOUND,
                 "Workflow not found"

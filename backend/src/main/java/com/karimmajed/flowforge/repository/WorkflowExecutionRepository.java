@@ -21,4 +21,9 @@ public interface WorkflowExecutionRepository
             Long workflowId,
             Pageable pageable
         );
+
+    Optional<WorkflowExecution> findByIdAndWorkflow_OwnerSubjectAndWorkflow_OwnerIssuer(
+            Long id,
+            String ownerSubject,
+            String ownerIssuer);
 }

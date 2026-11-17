@@ -26,6 +26,12 @@ public class Workflow {
     @Column(name = "webhook_token_hash", length = 64, unique = true)
     private String webhookTokenHash;
 
+    @Column(name = "owner_subject", length = 255)
+    private String ownerSubject;
+
+    @Column(name = "owner_issuer", length = 512)
+    private String ownerIssuer;
+
     protected Workflow() {
     }
 
@@ -67,5 +73,18 @@ public class Workflow {
 
     public void setWebhookTokenHash(String webhookTokenHash) {
         this.webhookTokenHash = webhookTokenHash;
+    }
+
+    public String getOwnerSubject() {
+        return ownerSubject;
+    }
+
+    public String getOwnerIssuer() {
+        return ownerIssuer;
+    }
+
+    public void assignOwner(String subject, String issuer) {
+        this.ownerSubject = subject;
+        this.ownerIssuer = issuer;
     }
 }

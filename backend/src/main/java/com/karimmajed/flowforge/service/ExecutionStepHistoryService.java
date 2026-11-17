@@ -3,6 +3,7 @@ package com.karimmajed.flowforge.service;
 import com.karimmajed.flowforge.dto.ExecutionStepResponse;
 import com.karimmajed.flowforge.enums.ExecutionStepStatus;
 import com.karimmajed.flowforge.enums.StepType;
+import com.karimmajed.flowforge.security.ResourceOwner;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -25,11 +26,19 @@ public class ExecutionStepHistoryService {
     }
 
     @Transactional(readOnly = true)
-    public List<ExecutionStepResponse> getSteps(Long executionId) {
-        Integer found = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM workflow_executions WHERE id = ?",
+    public List<ExecutionStepResponse> getSteps(Long executionId, ResourceOwner owner) {
+        Integer found = jdbc.queryForObject("""
+                SELECT COUNT(*)
+                FROM workflow_executions e
+                JOIN workflows w ON w.id = e.workflow_id
+                WHERE e.id = ?
+                  AND w.owner_subject = ?
+                  AND w.owner_issuer = ?
+                """,
                 Integer.class,
-                executionId);
+                executionId,
+                owner.subject(),
+                owner.issuer());
 
         if (found == null || found == 0) {
             throw new ResponseStatusException(
@@ -54,11 +63,16 @@ public class ExecutionStepHistoryService {
                 LEFT JOIN execution_step_checkpoints c
                   ON c.execution_id = e.id
                  AND c.workflow_step_id = s.id
+                JOIN workflows w ON w.id = e.workflow_id
                 WHERE e.id = ?
+                  AND w.owner_subject = ?
+                  AND w.owner_issuer = ?
                 ORDER BY s.position ASC, s.id ASC
                 """,
                 (rs, rowNum) -> mapRow(rs),
-                executionId);
+                executionId,
+                owner.subject(),
+                owner.issuer());
     }
 
     static ExecutionStepResponse mapRow(ResultSet rs) throws SQLException {

@@ -1,3 +1,4 @@
+import { clearSession, getAccessToken } from '../auth/session.ts'
 import { ApiError, isAbort } from './errors.ts'
 import {
   parseDashboardOverview,
@@ -105,6 +106,16 @@ async function request(
   if (payload !== undefined) {
     headers['Content-Type'] = 'application/json'
   }
+  // Webhook ingestion keeps its own token. Every other /api call uses the access token.
+  if (!path.startsWith('/api/webhooks')) {
+    const token = await getAccessToken()
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError')
+    }
+    if (token) {
+      headers.Authorization = `Bearer ${token}`
+    }
+  }
 
   try {
     response = await fetch(apiUrl(path), {
@@ -121,6 +132,10 @@ async function request(
   }
 
   const body = await readBody(response)
+
+  if (response.status === 401) {
+    await clearSession()
+  }
 
   if (!response.ok) {
     throw new ApiError(

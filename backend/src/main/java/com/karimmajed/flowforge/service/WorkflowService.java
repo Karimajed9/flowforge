@@ -6,6 +6,7 @@ import com.karimmajed.flowforge.dto.WorkflowResponse;
 import com.karimmajed.flowforge.entity.Workflow;
 import com.karimmajed.flowforge.repository.WorkflowRepository;
 import com.karimmajed.flowforge.dto.WebhookTokenResponse;
+import com.karimmajed.flowforge.security.ResourceOwner;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -27,18 +28,19 @@ public class WorkflowService {
     }
 
     @Transactional
-    public WorkflowResponse create(CreateWorkflowRequest request) {
+    public WorkflowResponse create(CreateWorkflowRequest request, ResourceOwner owner) {
         Workflow workflow = new Workflow(
             request.name(),
             request.description()
         );
+        workflow.assignOwner(owner.subject(), owner.issuer());
 
         Workflow saved = repository.save(workflow);
         return WorkflowResponse.from(saved);
     }
 
     @Transactional(readOnly = true)
-    public Page<WorkflowResponse> getPage(int page, int size) {
+    public Page<WorkflowResponse> getPage(int page, int size, ResourceOwner owner) {
         if (page < 0 || size < 1 || size > 100) {
             throw new ResponseStatusException(
                 HttpStatus.BAD_REQUEST,
@@ -55,30 +57,33 @@ public class WorkflowService {
             )
         );
 
-        return repository.findAll(pageable)
+        return repository
+            .findByOwnerSubjectAndOwnerIssuer(owner.subject(), owner.issuer(), pageable)
             .map(WorkflowResponse::from);
     }
 
     @Transactional(readOnly = true)
-    public WorkflowResponse getById(Long id) {
-        Workflow workflow = findWorkflow(id);
+    public WorkflowResponse getById(Long id, ResourceOwner owner) {
+        Workflow workflow = findWorkflow(id, owner);
         return WorkflowResponse.from(workflow);
     }
 
     @Transactional
     public WorkflowResponse updateStatus(
             Long id,
-            UpdateWorkflowStatusRequest request) {
+            UpdateWorkflowStatusRequest request,
+            ResourceOwner owner) {
 
-        Workflow workflow = findWorkflow(id);
+        Workflow workflow = findWorkflow(id, owner);
 
         workflow.setActive(request.active());
 
         return WorkflowResponse.from(workflow);
     }
 
-    private Workflow findWorkflow(Long id) {
-        return repository.findById(id)
+    private Workflow findWorkflow(Long id, ResourceOwner owner) {
+        return repository
+            .findByIdAndOwnerSubjectAndOwnerIssuer(id, owner.subject(), owner.issuer())
             .orElseThrow(() -> new ResponseStatusException(
                 HttpStatus.NOT_FOUND,
                 "Workflow not found"
@@ -86,9 +91,9 @@ public class WorkflowService {
     }
 
     @Transactional
-    public WebhookTokenResponse rotateWebhookToken(Long workflowId) {
+    public WebhookTokenResponse rotateWebhookToken(Long workflowId, ResourceOwner owner) {
 
-        Workflow workflow = findWorkflow(workflowId);
+        Workflow workflow = findWorkflow(workflowId, owner);
 
         String token = webhookTokenService.generateToken();
 

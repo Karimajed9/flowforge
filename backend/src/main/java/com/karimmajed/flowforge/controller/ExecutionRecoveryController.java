@@ -1,8 +1,10 @@
 package com.karimmajed.flowforge.controller;
 
 import com.karimmajed.flowforge.dto.AbandonRunningStepRequest;
+import com.karimmajed.flowforge.security.CurrentCaller;
 import com.karimmajed.flowforge.service.ExecutionAbandonmentService;
 import com.karimmajed.flowforge.service.ExecutionRecoveryService;
+import com.karimmajed.flowforge.service.WorkflowOwnership;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -25,16 +27,22 @@ public class ExecutionRecoveryController {
 
     private final ExecutionRecoveryService service;
     private final ExecutionAbandonmentService abandonment;
+    private final WorkflowOwnership ownership;
+    private final CurrentCaller caller;
     private final String expectedKey;
 
     public ExecutionRecoveryController(
             ExecutionRecoveryService service,
             ExecutionAbandonmentService abandonment,
+            WorkflowOwnership ownership,
+            CurrentCaller caller,
             @Value("${flowforge.recovery.token:}")
             String expectedKey) {
 
         this.service = service;
         this.abandonment = abandonment;
+        this.ownership = ownership;
+        this.caller = caller;
         this.expectedKey = expectedKey;
     }
 
@@ -48,6 +56,7 @@ public class ExecutionRecoveryController {
             String providedKey) {
 
         requireRecoveryKey(providedKey);
+        ownership.requireExecution(id, caller.require());
 
         service.requestRecovery(id);
 
@@ -84,6 +93,8 @@ public class ExecutionRecoveryController {
                     HttpStatus.BAD_REQUEST,
                     "Attempt number must be positive");
         }
+
+        ownership.requireExecution(id, caller.require());
 
         ExecutionAbandonmentService.Result result = abandonment.abandon(
                 id,

@@ -3,6 +3,7 @@ package com.karimmajed.flowforge.service;
 import com.karimmajed.flowforge.dto.ExecutionStepResponse;
 import com.karimmajed.flowforge.enums.ExecutionStepStatus;
 import com.karimmajed.flowforge.enums.StepType;
+import com.karimmajed.flowforge.security.ResourceOwner;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -39,6 +40,9 @@ class ExecutionStepHistoryServiceTest {
 
     @InjectMocks
     private ExecutionStepHistoryService service;
+
+    private static final ResourceOwner OWNER =
+            new ResourceOwner("user", "http://auth.test/realms/flowforge");
 
     @Test
     void missingCheckpointIsNotStarted() throws Exception {
@@ -118,12 +122,17 @@ class ExecutionStepHistoryServiceTest {
 
     @Test
     void missingExecutionDoesNotReadSteps() {
-        when(jdbc.queryForObject(anyString(), eq(Integer.class), eq(99L)))
+        when(jdbc.queryForObject(
+                anyString(),
+                eq(Integer.class),
+                eq(99L),
+                eq(OWNER.subject()),
+                eq(OWNER.issuer())))
                 .thenReturn(0);
 
         ResponseStatusException ex = assertThrows(
                 ResponseStatusException.class,
-                () -> service.getSteps(99L));
+                () -> service.getSteps(99L, OWNER));
 
         assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(ex.getReason()).isEqualTo("Execution not found");

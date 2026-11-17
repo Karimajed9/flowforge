@@ -1,4 +1,5 @@
 import { BrowserRouter, Route, Routes } from 'react-router'
+import { AuthCallback } from './auth/AuthCallback.tsx'
 import { AppLayout } from './components/AppLayout.tsx'
 import { ExecutionDetailPage } from './pages/ExecutionDetailPage.tsx'
 import { ExecutionsPage } from './pages/ExecutionsPage.tsx'
@@ -10,6 +11,7 @@ import { WorkflowsPage } from './pages/WorkflowsPage.tsx'
 export function AppRoutes() {
   return (
     <Routes>
+      <Route path="auth/callback" element={<AuthCallback />} />
       <Route element={<AppLayout />}>
         <Route index element={<OverviewPage />} />
         <Route path="workflows" element={<WorkflowsPage />} />

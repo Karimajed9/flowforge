@@ -3,6 +3,7 @@ package com.karimmajed.flowforge.controller;
 import com.karimmajed.flowforge.dto.ExecutionStepResponse;
 import com.karimmajed.flowforge.dto.RecentExecutionResponse;
 import com.karimmajed.flowforge.dto.WorkflowExecutionResponse;
+import com.karimmajed.flowforge.security.CurrentCaller;
 import com.karimmajed.flowforge.service.DashboardReadService;
 import com.karimmajed.flowforge.service.ExecutionStepHistoryService;
 import com.karimmajed.flowforge.service.WorkflowExecutionService;
@@ -22,13 +23,17 @@ public class WorkflowExecutionController {
 
     private final DashboardReadService dashboardReads;
 
+    private final CurrentCaller caller;
+
     public WorkflowExecutionController(
             WorkflowExecutionService service,
             ExecutionStepHistoryService stepHistory,
-            DashboardReadService dashboardReads) {
+            DashboardReadService dashboardReads,
+            CurrentCaller caller) {
         this.service = service;
         this.stepHistory = stepHistory;
         this.dashboardReads = dashboardReads;
+        this.caller = caller;
     }
 
     @GetMapping("/executions")
@@ -36,21 +41,21 @@ public class WorkflowExecutionController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
-        return dashboardReads.recentExecutions(page, size);
+        return dashboardReads.recentExecutions(page, size, caller.require());
     }
 
     @GetMapping("/executions/{id}")
     public WorkflowExecutionResponse getExecution(
             @PathVariable Long id) {
 
-        return service.getById(id);
+        return service.getById(id, caller.require());
     }
 
     @GetMapping("/executions/{id}/steps")
     public List<ExecutionStepResponse> getExecutionSteps(
             @PathVariable Long id) {
 
-        return stepHistory.getSteps(id);
+        return stepHistory.getSteps(id, caller.require());
     }
 
     @GetMapping("/workflows/{workflowId}/executions")
@@ -62,7 +67,8 @@ public class WorkflowExecutionController {
         return service.getByWorkflow(
             workflowId,
             page,
-            size
+            size,
+            caller.require()
         );
     }
 }

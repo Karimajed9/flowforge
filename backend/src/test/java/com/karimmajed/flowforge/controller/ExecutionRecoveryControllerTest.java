@@ -1,7 +1,9 @@
 package com.karimmajed.flowforge.controller;
 
+import com.karimmajed.flowforge.security.TestAccess;
 import com.karimmajed.flowforge.service.ExecutionAbandonmentService;
 import com.karimmajed.flowforge.service.ExecutionRecoveryService;
+import com.karimmajed.flowforge.service.WorkflowOwnership;
 
 import org.junit.jupiter.api.Test;
 
@@ -39,9 +41,13 @@ class ExecutionRecoveryControllerTest {
     @MockitoBean
     private ExecutionAbandonmentService abandonment;
 
+    @MockitoBean
+    private WorkflowOwnership ownership;
+
     @Test
     void matchingKeyQueuesRecovery() throws Exception {
         mockMvc.perform(post("/api/admin/executions/{id}/recover", 21)
+                        .with(TestAccess.admin())
                         .header("X-Recovery-Key", "test-recovery-key"))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.executionId").value(21))
@@ -53,19 +59,21 @@ class ExecutionRecoveryControllerTest {
 
     @Test
     void missingKeyIsForbidden() throws Exception {
-        mockMvc.perform(post("/api/admin/executions/{id}/recover", 21))
+        mockMvc.perform(post("/api/admin/executions/{id}/recover", 21)
+                        .with(TestAccess.admin()))
                 .andExpect(status().isForbidden());
 
-        verifyNoInteractions(service);
+        verifyNoInteractions(service, ownership);
     }
 
     @Test
     void wrongKeyIsForbidden() throws Exception {
         mockMvc.perform(post("/api/admin/executions/{id}/recover", 21)
+                        .with(TestAccess.admin())
                         .header("X-Recovery-Key", "other-key"))
                 .andExpect(status().isForbidden());
 
-        verifyNoInteractions(service);
+        verifyNoInteractions(service, ownership);
     }
 
     @Test
@@ -76,6 +84,7 @@ class ExecutionRecoveryControllerTest {
                 .when(service).requestRecovery(21L);
 
         mockMvc.perform(post("/api/admin/executions/{id}/recover", 21)
+                        .with(TestAccess.admin())
                         .header("X-Recovery-Key", "test-recovery-key"))
                 .andExpect(status().isConflict());
     }
@@ -83,6 +92,7 @@ class ExecutionRecoveryControllerTest {
     @Test
     void nonNumericIdDoesNotCallTheService() throws Exception {
         mockMvc.perform(post("/api/admin/executions/{id}/recover", "abc")
+                        .with(TestAccess.admin())
                         .header("X-Recovery-Key", "test-recovery-key"))
                 .andExpect(status().isBadRequest());
 
@@ -95,6 +105,7 @@ class ExecutionRecoveryControllerTest {
                 .thenReturn(new ExecutionAbandonmentService.Result(21L, 8L, 1));
 
         mockMvc.perform(post("/api/admin/executions/{id}/steps/{stepId}/abandon", 21, 8)
+                        .with(TestAccess.admin())
                         .header("X-Recovery-Key", "test-recovery-key")
                         .contentType(APPLICATION_JSON)
                         .content("""
@@ -115,12 +126,13 @@ class ExecutionRecoveryControllerTest {
     @Test
     void abandonWithoutAKeyIsForbidden() throws Exception {
         mockMvc.perform(post("/api/admin/executions/{id}/steps/{stepId}/abandon", 21, 8)
+                        .with(TestAccess.admin())
                         .contentType(APPLICATION_JSON)
                         .content("""
                                 {"attemptNumber":1,"reason":"worker process is gone"}
                                 """))
                 .andExpect(status().isForbidden());
 
-        verifyNoInteractions(service, abandonment);
+        verifyNoInteractions(service, abandonment, ownership);
     }
 }

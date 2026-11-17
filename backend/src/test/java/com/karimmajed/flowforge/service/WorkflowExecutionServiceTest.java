@@ -6,6 +6,7 @@ import com.karimmajed.flowforge.entity.WorkflowExecution;
 import com.karimmajed.flowforge.enums.ExecutionStatus;
 import com.karimmajed.flowforge.repository.WorkflowExecutionRepository;
 import com.karimmajed.flowforge.repository.WorkflowRepository;
+import com.karimmajed.flowforge.security.ResourceOwner;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -53,14 +54,18 @@ class WorkflowExecutionServiceTest {
     @InjectMocks
     private WorkflowExecutionService service;
 
+    private static final ResourceOwner OWNER =
+            new ResourceOwner("user", "http://auth.test/realms/flowforge");
+
     @Test
     void getById_returnsTheExecution() {
         WorkflowExecution execution = execution(21L);
 
-        when(executionRepository.findById(21L))
+        when(executionRepository.findByIdAndWorkflow_OwnerSubjectAndWorkflow_OwnerIssuer(
+                21L, OWNER.subject(), OWNER.issuer()))
                 .thenReturn(Optional.of(execution));
 
-        WorkflowExecutionResponse response = service.getById(21L);
+        WorkflowExecutionResponse response = service.getById(21L, OWNER);
 
         assertThat(response.id()).isEqualTo(21L);
         assertThat(response.workflowId()).isEqualTo(7L);
@@ -77,10 +82,11 @@ class WorkflowExecutionServiceTest {
         execution.markRunning();
         execution.markFailed("Missing required field: customerId");
 
-        when(executionRepository.findById(21L))
+        when(executionRepository.findByIdAndWorkflow_OwnerSubjectAndWorkflow_OwnerIssuer(
+                21L, OWNER.subject(), OWNER.issuer()))
                 .thenReturn(Optional.of(execution));
 
-        WorkflowExecutionResponse response = service.getById(21L);
+        WorkflowExecutionResponse response = service.getById(21L, OWNER);
 
         assertThat(response.status()).isEqualTo(ExecutionStatus.FAILED);
         assertThat(response.failureReason())
@@ -89,11 +95,12 @@ class WorkflowExecutionServiceTest {
 
     @Test
     void getById_missingExecution_isNotFound() {
-        when(executionRepository.findById(99L)).thenReturn(Optional.empty());
+        when(executionRepository.findByIdAndWorkflow_OwnerSubjectAndWorkflow_OwnerIssuer(
+                99L, OWNER.subject(), OWNER.issuer())).thenReturn(Optional.empty());
 
         ResponseStatusException ex = assertThrows(
                 ResponseStatusException.class,
-                () -> service.getById(99L));
+                () -> service.getById(99L, OWNER));
 
         assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(ex.getReason()).isEqualTo("Execution not found");
@@ -102,11 +109,12 @@ class WorkflowExecutionServiceTest {
     @Test
     void getByWorkflow_returnsNewestPage() {
         WorkflowExecution execution = execution(21L);
-        when(workflowRepository.existsById(7L)).thenReturn(true);
+        when(workflowRepository.existsByIdAndOwnerSubjectAndOwnerIssuer(
+                7L, OWNER.subject(), OWNER.issuer())).thenReturn(true);
         when(executionRepository.findByWorkflow_Id(eq(7L), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(execution)));
 
-        Page<WorkflowExecutionResponse> page = service.getByWorkflow(7L, 1, 20);
+        Page<WorkflowExecutionResponse> page = service.getByWorkflow(7L, 1, 20, OWNER);
 
         assertThat(page.getContent()).singleElement().satisfies(row -> {
             assertThat(row.id()).isEqualTo(21L);
@@ -116,7 +124,8 @@ class WorkflowExecutionServiceTest {
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
         InOrder order = inOrder(workflowRepository, executionRepository);
-        order.verify(workflowRepository).existsById(7L);
+        order.verify(workflowRepository).existsByIdAndOwnerSubjectAndOwnerIssuer(
+                7L, OWNER.subject(), OWNER.issuer());
         order.verify(executionRepository).findByWorkflow_Id(eq(7L), pageable.capture());
 
         assertThat(pageable.getValue().getPageNumber()).isEqualTo(1);
@@ -131,11 +140,12 @@ class WorkflowExecutionServiceTest {
 
     @Test
     void getByWorkflow_missingWorkflow_isNotFoundAndDoesNotQueryExecutions() {
-        when(workflowRepository.existsById(99L)).thenReturn(false);
+        when(workflowRepository.existsByIdAndOwnerSubjectAndOwnerIssuer(
+                99L, OWNER.subject(), OWNER.issuer())).thenReturn(false);
 
         ResponseStatusException ex = assertThrows(
                 ResponseStatusException.class,
-                () -> service.getByWorkflow(99L, 0, 20));
+                () -> service.getByWorkflow(99L, 0, 20, OWNER));
 
         assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(ex.getReason()).isEqualTo("Workflow not found");
@@ -152,7 +162,7 @@ class WorkflowExecutionServiceTest {
     void getByWorkflow_rejectsPageAndSizeOutsideTheAllowedRange(int page, int size) {
         ResponseStatusException ex = assertThrows(
                 ResponseStatusException.class,
-                () -> service.getByWorkflow(7L, page, size));
+                () -> service.getByWorkflow(7L, page, size, OWNER));
 
         assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(ex.getReason())

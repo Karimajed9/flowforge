@@ -7,6 +7,7 @@ import com.karimmajed.flowforge.entity.WorkflowStep;
 import com.karimmajed.flowforge.enums.StepType;
 import com.karimmajed.flowforge.repository.WorkflowRepository;
 import com.karimmajed.flowforge.repository.WorkflowStepRepository;
+import com.karimmajed.flowforge.security.ResourceOwner;
 import com.karimmajed.flowforge.validation.StepConfigurationValidator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -49,6 +50,9 @@ class WorkflowStepServiceTest {
     @InjectMocks
     private WorkflowStepService service;
 
+    private static final ResourceOwner OWNER =
+            new ResourceOwner("user", "http://auth.test/realms/flowforge");
+
     @Test
     void create_savesValidatedStepAndReturnsIt() {
         Workflow workflow = new Workflow("Onboarding", "New hire");
@@ -61,18 +65,18 @@ class WorkflowStepServiceTest {
                 2,
                 configuration);
 
-        when(workflowRepository.findById(8L)).thenReturn(Optional.of(workflow));
+        when(workflowRepository.findByIdAndOwnerSubjectAndOwnerIssuer(8L, OWNER.subject(), OWNER.issuer())).thenReturn(Optional.of(workflow));
         when(stepRepository.save(any())).thenAnswer(invocation -> {
             WorkflowStep saved = invocation.getArgument(0);
             setId(saved, 15L);
             return saved;
         });
 
-        WorkflowStepResponse response = service.create(8L, request);
+        WorkflowStepResponse response = service.create(8L, request, OWNER);
 
         ArgumentCaptor<WorkflowStep> saved = ArgumentCaptor.forClass(WorkflowStep.class);
         InOrder order = inOrder(workflowRepository, configurationValidator, stepRepository);
-        order.verify(workflowRepository).findById(8L);
+        order.verify(workflowRepository).findByIdAndOwnerSubjectAndOwnerIssuer(8L, OWNER.subject(), OWNER.issuer());
         order.verify(configurationValidator).validate(StepType.HTTP_REQUEST, configuration);
         order.verify(stepRepository).existsByWorkflow_IdAndPosition(8L, 2);
         order.verify(stepRepository).save(saved.capture());
@@ -92,11 +96,11 @@ class WorkflowStepServiceTest {
 
     @Test
     void create_missingWorkflow_isNotFoundAndDoesNotContinue() {
-        when(workflowRepository.findById(8L)).thenReturn(Optional.empty());
+        when(workflowRepository.findByIdAndOwnerSubjectAndOwnerIssuer(8L, OWNER.subject(), OWNER.issuer())).thenReturn(Optional.empty());
 
         ResponseStatusException ex = assertThrows(
                 ResponseStatusException.class,
-                () -> service.create(8L, request()));
+                () -> service.create(8L, request(), OWNER));
 
         assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(ex.getReason()).isEqualTo("Workflow not found");
@@ -105,7 +109,7 @@ class WorkflowStepServiceTest {
 
     @Test
     void create_invalidConfiguration_doesNotCheckPositionOrSave() {
-        when(workflowRepository.findById(8L))
+        when(workflowRepository.findByIdAndOwnerSubjectAndOwnerIssuer(8L, OWNER.subject(), OWNER.issuer()))
                 .thenReturn(Optional.of(new Workflow("Onboarding", null)));
         doThrow(new ResponseStatusException(
                 HttpStatus.BAD_REQUEST,
@@ -115,7 +119,7 @@ class WorkflowStepServiceTest {
 
         ResponseStatusException ex = assertThrows(
                 ResponseStatusException.class,
-                () -> service.create(8L, request()));
+                () -> service.create(8L, request(), OWNER));
 
         assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(ex.getReason()).isEqualTo("requiredFields must be a non-empty array");
@@ -125,13 +129,13 @@ class WorkflowStepServiceTest {
 
     @Test
     void create_duplicatePosition_isConflictAndDoesNotSave() {
-        when(workflowRepository.findById(8L))
+        when(workflowRepository.findByIdAndOwnerSubjectAndOwnerIssuer(8L, OWNER.subject(), OWNER.issuer()))
                 .thenReturn(Optional.of(new Workflow("Onboarding", null)));
         when(stepRepository.existsByWorkflow_IdAndPosition(8L, 1)).thenReturn(true);
 
         ResponseStatusException ex = assertThrows(
                 ResponseStatusException.class,
-                () -> service.create(8L, request()));
+                () -> service.create(8L, request(), OWNER));
 
         assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(ex.getReason()).isEqualTo("A step already exists at this position");
@@ -144,27 +148,27 @@ class WorkflowStepServiceTest {
         Workflow workflow = new Workflow("Onboarding", null);
         WorkflowStep first = step(workflow, "Validate", StepType.VALIDATE_FIELDS, 1, 4L);
         WorkflowStep second = step(workflow, "Notify", StepType.HTTP_REQUEST, 2, 5L);
-        when(workflowRepository.existsById(8L)).thenReturn(true);
+        when(workflowRepository.existsByIdAndOwnerSubjectAndOwnerIssuer(8L, OWNER.subject(), OWNER.issuer())).thenReturn(true);
         when(stepRepository.findByWorkflow_IdOrderByPositionAsc(8L))
                 .thenReturn(List.of(first, second));
 
-        List<WorkflowStepResponse> responses = service.getAll(8L);
+        List<WorkflowStepResponse> responses = service.getAll(8L, OWNER);
 
         assertThat(responses).containsExactly(
                 WorkflowStepResponse.from(first),
                 WorkflowStepResponse.from(second));
-        verify(workflowRepository).existsById(8L);
+        verify(workflowRepository).existsByIdAndOwnerSubjectAndOwnerIssuer(8L, OWNER.subject(), OWNER.issuer());
         verify(stepRepository).findByWorkflow_IdOrderByPositionAsc(8L);
         verifyNoInteractions(configurationValidator);
     }
 
     @Test
     void getAll_missingWorkflow_isNotFoundAndDoesNotQuerySteps() {
-        when(workflowRepository.existsById(8L)).thenReturn(false);
+        when(workflowRepository.existsByIdAndOwnerSubjectAndOwnerIssuer(8L, OWNER.subject(), OWNER.issuer())).thenReturn(false);
 
         ResponseStatusException ex = assertThrows(
                 ResponseStatusException.class,
-                () -> service.getAll(8L));
+                () -> service.getAll(8L, OWNER));
 
         assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(ex.getReason()).isEqualTo("Workflow not found");
