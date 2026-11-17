@@ -3,6 +3,7 @@ package com.karimmajed.flowforge.service;
 import com.karimmajed.flowforge.dto.*;
 import com.karimmajed.flowforge.entity.*;
 import com.karimmajed.flowforge.repository.*;
+import com.karimmajed.flowforge.security.ResourceOwner;
 import com.karimmajed.flowforge.validation.StepConfigurationValidator;
 
 import org.springframework.http.HttpStatus;
@@ -31,9 +32,12 @@ public class WorkflowStepService {
     @Transactional
     public WorkflowStepResponse create(
             Long workflowId,
-            CreateWorkflowStepRequest request) {
+            CreateWorkflowStepRequest request,
+            ResourceOwner owner) {
 
-        Workflow workflow = workflowRepository.findById(workflowId)
+        Workflow workflow = workflowRepository
+            .findByIdAndOwnerSubjectAndOwnerIssuer(
+                    workflowId, owner.subject(), owner.issuer())
             .orElseThrow(() -> new ResponseStatusException(
                 HttpStatus.NOT_FOUND, "Workflow not found"
             ));
@@ -66,9 +70,10 @@ public class WorkflowStepService {
     }
 
     @Transactional(readOnly = true)
-    public List<WorkflowStepResponse> getAll(Long workflowId) {
+    public List<WorkflowStepResponse> getAll(Long workflowId, ResourceOwner owner) {
 
-        if (!workflowRepository.existsById(workflowId)) {
+        if (!workflowRepository.existsByIdAndOwnerSubjectAndOwnerIssuer(
+                workflowId, owner.subject(), owner.issuer())) {
             throw new ResponseStatusException(
                 HttpStatus.NOT_FOUND, "Workflow not found"
             );

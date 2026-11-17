@@ -3,6 +3,7 @@ package com.karimmajed.flowforge.controller;
 import com.karimmajed.flowforge.security.TestAccess;
 import com.karimmajed.flowforge.service.ExecutionAbandonmentService;
 import com.karimmajed.flowforge.service.ExecutionRecoveryService;
+import com.karimmajed.flowforge.service.WorkflowOwnership;
 
 import org.junit.jupiter.api.Test;
 
@@ -40,6 +41,9 @@ class ExecutionRecoveryControllerTest {
     @MockitoBean
     private ExecutionAbandonmentService abandonment;
 
+    @MockitoBean
+    private WorkflowOwnership ownership;
+
     @Test
     void matchingKeyQueuesRecovery() throws Exception {
         mockMvc.perform(post("/api/admin/executions/{id}/recover", 21)
@@ -59,7 +63,7 @@ class ExecutionRecoveryControllerTest {
                         .with(TestAccess.admin()))
                 .andExpect(status().isForbidden());
 
-        verifyNoInteractions(service);
+        verifyNoInteractions(service, ownership);
     }
 
     @Test
@@ -69,7 +73,7 @@ class ExecutionRecoveryControllerTest {
                         .header("X-Recovery-Key", "other-key"))
                 .andExpect(status().isForbidden());
 
-        verifyNoInteractions(service);
+        verifyNoInteractions(service, ownership);
     }
 
     @Test
@@ -129,6 +133,6 @@ class ExecutionRecoveryControllerTest {
                                 """))
                 .andExpect(status().isForbidden());
 
-        verifyNoInteractions(service, abandonment);
+        verifyNoInteractions(service, abandonment, ownership);
     }
 }

@@ -20,14 +20,18 @@ public class SecurityWebMvcContextCustomizerFactory implements ContextCustomizer
         if (!AnnotatedElementUtils.hasAnnotation(testClass, WebMvcTest.class)) {
             return null;
         }
-        boolean defaultUser = testClass != ApiSecurityTest.class;
+        boolean defaultUser = testClass != ApiSecurityTest.class
+                && testClass != IssuerUnavailableSecurityTest.class;
         return (context, mergedConfig) -> {
             if (context instanceof GenericApplicationContext generic) {
                 AnnotatedBeanDefinitionReader reader = new AnnotatedBeanDefinitionReader(generic);
                 if (defaultUser) {
-                    reader.register(SecurityConfig.class, SecurityWebTestConfiguration.class);
+                    reader.register(
+                            SecurityConfig.class,
+                            SecurityWebTestConfiguration.class,
+                            CurrentCaller.class);
                 } else {
-                    reader.register(SecurityConfig.class);
+                    reader.register(SecurityConfig.class, CurrentCaller.class);
                 }
             }
         };

@@ -3,6 +3,7 @@ package com.karimmajed.flowforge.controller;
 import com.karimmajed.flowforge.dto.CreateWorkflowStepRequest;
 import com.karimmajed.flowforge.dto.WorkflowStepResponse;
 import com.karimmajed.flowforge.enums.StepType;
+import com.karimmajed.flowforge.security.ResourceOwner;
 import com.karimmajed.flowforge.service.WorkflowStepService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -40,7 +41,7 @@ class WorkflowStepControllerTest {
 
     @Test
     void create_returnsValidateFieldsStep() throws Exception {
-        when(service.create(eq(4L), any())).thenReturn(new WorkflowStepResponse(
+        when(service.create(eq(4L), any(), any(ResourceOwner.class))).thenReturn(new WorkflowStepResponse(
                 10L,
                 "Validate email",
                 StepType.VALIDATE_FIELDS,
@@ -64,12 +65,12 @@ class WorkflowStepControllerTest {
                 .andExpect(jsonPath("$.position").value(1))
                 .andExpect(jsonPath("$.configuration.requiredFields[0]").value("email"));
 
-        verify(service).create(eq(4L), any(CreateWorkflowStepRequest.class));
+        verify(service).create(eq(4L), any(CreateWorkflowStepRequest.class), any(ResourceOwner.class));
     }
 
     @Test
     void create_returnsHttpRequestStep() throws Exception {
-        when(service.create(eq(4L), any())).thenReturn(new WorkflowStepResponse(
+        when(service.create(eq(4L), any(), any(ResourceOwner.class))).thenReturn(new WorkflowStepResponse(
                 11L,
                 "Call API",
                 StepType.HTTP_REQUEST,
@@ -97,12 +98,12 @@ class WorkflowStepControllerTest {
                 .andExpect(jsonPath("$.configuration.method").value("GET"))
                 .andExpect(jsonPath("$.configuration.url").value("https://example.com/hook"));
 
-        verify(service).create(eq(4L), any(CreateWorkflowStepRequest.class));
+        verify(service).create(eq(4L), any(CreateWorkflowStepRequest.class), any(ResourceOwner.class));
     }
 
     @Test
     void getAll_returnsSteps() throws Exception {
-        when(service.getAll(4L)).thenReturn(List.of(
+        when(service.getAll(eq(4L), any(ResourceOwner.class))).thenReturn(List.of(
                 new WorkflowStepResponse(
                         10L,
                         "Validate email",
@@ -126,7 +127,7 @@ class WorkflowStepControllerTest {
                 .andExpect(jsonPath("$[1].stepType").value("HTTP_REQUEST"))
                 .andExpect(jsonPath("$[1].configuration.url").value("https://example.com/hook"));
 
-        verify(service).getAll(4L);
+        verify(service).getAll(eq(4L), any(ResourceOwner.class));
     }
 
     @ParameterizedTest
@@ -161,12 +162,13 @@ class WorkflowStepControllerTest {
                         .content(body))
                 .andExpect(status().isBadRequest());
 
-        verify(service, never()).create(any(), any());
+        verify(service, never()).create(any(), any(), any());
     }
 
     @Test
     void create_missingWorkflow_isNotFound() throws Exception {
-        when(service.create(eq(99L), any())).thenThrow(new ResponseStatusException(
+        when(service.create(eq(99L), any(), any(ResourceOwner.class)))
+                .thenThrow(new ResponseStatusException(
                 HttpStatus.NOT_FOUND,
                 "Workflow not found"));
 
@@ -178,7 +180,8 @@ class WorkflowStepControllerTest {
 
     @Test
     void getAll_missingWorkflow_isNotFound() throws Exception {
-        when(service.getAll(99L)).thenThrow(new ResponseStatusException(
+        when(service.getAll(eq(99L), any(ResourceOwner.class)))
+                .thenThrow(new ResponseStatusException(
                 HttpStatus.NOT_FOUND,
                 "Workflow not found"));
 
@@ -188,7 +191,7 @@ class WorkflowStepControllerTest {
 
     @Test
     void create_duplicatePosition_isConflict() throws Exception {
-        when(service.create(eq(4L), any())).thenThrow(new ResponseStatusException(
+        when(service.create(eq(4L), any(), any(ResourceOwner.class))).thenThrow(new ResponseStatusException(
                 HttpStatus.CONFLICT,
                 "A step already exists at this position"));
 
@@ -200,7 +203,7 @@ class WorkflowStepControllerTest {
 
     @Test
     void create_invalidConfiguration_isBadRequest() throws Exception {
-        when(service.create(eq(4L), any())).thenThrow(new ResponseStatusException(
+        when(service.create(eq(4L), any(), any(ResourceOwner.class))).thenThrow(new ResponseStatusException(
                 HttpStatus.BAD_REQUEST,
                 "Method must be GET"));
 

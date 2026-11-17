@@ -1,6 +1,7 @@
 package com.karimmajed.flowforge.controller;
 
 import com.karimmajed.flowforge.dto.DashboardOverviewResponse;
+import com.karimmajed.flowforge.security.CurrentCaller;
 import com.karimmajed.flowforge.service.DashboardReadService;
 
 import org.springframework.web.bind.annotation.GetMapping;
@@ -12,13 +13,15 @@ import org.springframework.web.bind.annotation.RestController;
 public class DashboardController {
 
     private final DashboardReadService reads;
+    private final CurrentCaller caller;
 
-    public DashboardController(DashboardReadService reads) {
+    public DashboardController(DashboardReadService reads, CurrentCaller caller) {
         this.reads = reads;
+        this.caller = caller;
     }
 
     @GetMapping("/overview")
     public DashboardOverviewResponse overview() {
-        return reads.overview();
+        return reads.overview(caller.require());
     }
 }

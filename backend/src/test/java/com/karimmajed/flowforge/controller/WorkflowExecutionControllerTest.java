@@ -6,6 +6,7 @@ import com.karimmajed.flowforge.dto.WorkflowExecutionResponse;
 import com.karimmajed.flowforge.enums.ExecutionStatus;
 import com.karimmajed.flowforge.enums.ExecutionStepStatus;
 import com.karimmajed.flowforge.enums.StepType;
+import com.karimmajed.flowforge.security.ResourceOwner;
 import com.karimmajed.flowforge.service.DashboardReadService;
 import com.karimmajed.flowforge.service.ExecutionStepHistoryService;
 import com.karimmajed.flowforge.service.WorkflowExecutionService;
@@ -24,6 +25,8 @@ import java.time.OffsetDateTime;
 import java.util.List;
 
 import static org.hamcrest.Matchers.nullValue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -48,7 +51,7 @@ class WorkflowExecutionControllerTest {
 
     @Test
     void getExecutionReturnsTheRecord() throws Exception {
-        when(service.getById(21L)).thenReturn(sample());
+        when(service.getById(eq(21L), any(ResourceOwner.class))).thenReturn(sample());
 
         mockMvc.perform(get("/api/executions/{id}", 21))
                 .andExpect(status().isOk())
@@ -58,12 +61,12 @@ class WorkflowExecutionControllerTest {
                 .andExpect(jsonPath("$.createdAt").value("2026-11-13T17:02:00Z"))
                 .andExpect(jsonPath("$.failureReason").value(nullValue()));
 
-        verify(service).getById(21L);
+        verify(service).getById(eq(21L), any(ResourceOwner.class));
     }
 
     @Test
     void getExecutionReturnsTheFailureReason() throws Exception {
-        when(service.getById(21L)).thenReturn(new WorkflowExecutionResponse(
+        when(service.getById(eq(21L), any(ResourceOwner.class))).thenReturn(new WorkflowExecutionResponse(
                 21L,
                 7L,
                 ExecutionStatus.FAILED,
@@ -79,7 +82,7 @@ class WorkflowExecutionControllerTest {
 
     @Test
     void missingExecutionIsNotFound() throws Exception {
-        when(service.getById(99L)).thenThrow(new ResponseStatusException(
+        when(service.getById(eq(99L), any(ResourceOwner.class))).thenThrow(new ResponseStatusException(
                 HttpStatus.NOT_FOUND,
                 "Execution not found"));
 
@@ -89,7 +92,7 @@ class WorkflowExecutionControllerTest {
 
     @Test
     void workflowExecutionsUseTheDefaultPage() throws Exception {
-        when(service.getByWorkflow(7L, 0, 20))
+        when(service.getByWorkflow(eq(7L), eq(0), eq(20), any(ResourceOwner.class)))
                 .thenReturn(new PageImpl<>(List.of(sample())));
 
         mockMvc.perform(get("/api/workflows/{workflowId}/executions", 7))
@@ -100,12 +103,12 @@ class WorkflowExecutionControllerTest {
                 .andExpect(jsonPath("$.content[0].failureReason").value(nullValue()))
                 .andExpect(jsonPath("$.totalElements").value(1));
 
-        verify(service).getByWorkflow(7L, 0, 20);
+        verify(service).getByWorkflow(eq(7L), eq(0), eq(20), any(ResourceOwner.class));
     }
 
     @Test
     void workflowExecutionsPassPageAndSize() throws Exception {
-        when(service.getByWorkflow(7L, 2, 50))
+        when(service.getByWorkflow(eq(7L), eq(2), eq(50), any(ResourceOwner.class)))
                 .thenReturn(new PageImpl<>(List.of()));
 
         mockMvc.perform(get("/api/workflows/{workflowId}/executions", 7)
@@ -114,12 +117,12 @@ class WorkflowExecutionControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isEmpty());
 
-        verify(service).getByWorkflow(7L, 2, 50);
+        verify(service).getByWorkflow(eq(7L), eq(2), eq(50), any(ResourceOwner.class));
     }
 
     @Test
     void invalidPageIsBadRequest() throws Exception {
-        when(service.getByWorkflow(7L, -1, 20)).thenThrow(new ResponseStatusException(
+        when(service.getByWorkflow(eq(7L), eq(-1), eq(20), any(ResourceOwner.class))).thenThrow(new ResponseStatusException(
                 HttpStatus.BAD_REQUEST,
                 "Page must be >= 0 and size must be between 1 and 100"));
 
@@ -130,7 +133,7 @@ class WorkflowExecutionControllerTest {
 
     @Test
     void missingWorkflowIsNotFound() throws Exception {
-        when(service.getByWorkflow(99L, 0, 20)).thenThrow(new ResponseStatusException(
+        when(service.getByWorkflow(eq(99L), eq(0), eq(20), any(ResourceOwner.class))).thenThrow(new ResponseStatusException(
                 HttpStatus.NOT_FOUND,
                 "Workflow not found"));
 
@@ -148,7 +151,7 @@ class WorkflowExecutionControllerTest {
 
     @Test
     void getExecutionStepsReturnsCheckpointHistory() throws Exception {
-        when(stepHistory.getSteps(21L)).thenReturn(List.of(
+        when(stepHistory.getSteps(eq(21L), any(ResourceOwner.class))).thenReturn(List.of(
                 new ExecutionStepResponse(
                         4L,
                         "Order",
@@ -204,13 +207,13 @@ class WorkflowExecutionControllerTest {
                 .andExpect(jsonPath("$[1].configuration").doesNotExist())
                 .andExpect(jsonPath("$[1].body").doesNotExist());
 
-        verify(stepHistory).getSteps(21L);
+        verify(stepHistory).getSteps(eq(21L), any(ResourceOwner.class));
         verifyNoInteractions(service);
     }
 
     @Test
     void missingExecutionStepsAreNotFound() throws Exception {
-        when(stepHistory.getSteps(99L)).thenThrow(new ResponseStatusException(
+        when(stepHistory.getSteps(eq(99L), any(ResourceOwner.class))).thenThrow(new ResponseStatusException(
                 HttpStatus.NOT_FOUND,
                 "Execution not found"));
 
@@ -228,7 +231,7 @@ class WorkflowExecutionControllerTest {
 
     @Test
     void recentExecutionsOmitPayloadsAndSecrets() throws Exception {
-        when(dashboardReads.recentExecutions(0, 20)).thenReturn(new PageImpl<>(List.of(
+        when(dashboardReads.recentExecutions(eq(0), eq(20), any(ResourceOwner.class))).thenReturn(new PageImpl<>(List.of(
                 new RecentExecutionResponse(
                         21L,
                         4L,
@@ -251,13 +254,13 @@ class WorkflowExecutionControllerTest {
                 .andExpect(jsonPath("$.content[0].webhookTokenHash").doesNotExist())
                 .andExpect(jsonPath("$.totalElements").value(1));
 
-        verify(dashboardReads).recentExecutions(0, 20);
+        verify(dashboardReads).recentExecutions(eq(0), eq(20), any(ResourceOwner.class));
         verifyNoInteractions(service, stepHistory);
     }
 
     @Test
     void recentExecutionsRejectAnOversizedPage() throws Exception {
-        when(dashboardReads.recentExecutions(0, 101)).thenThrow(new ResponseStatusException(
+        when(dashboardReads.recentExecutions(eq(0), eq(101), any(ResourceOwner.class))).thenThrow(new ResponseStatusException(
                 HttpStatus.BAD_REQUEST,
                 "Page must be >= 0 and size must be between 1 and 100"));
 

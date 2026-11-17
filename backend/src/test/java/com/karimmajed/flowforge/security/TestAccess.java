@@ -29,23 +29,32 @@ public final class TestAccess {
     }
 
     public static RequestPostProcessor user() {
-        return jwt().jwt(token -> token.claim("scope", "flowforge.user"));
+        return scoped("user", "flowforge.user");
     }
 
     public static RequestPostProcessor admin() {
-        return jwt().jwt(token -> token.claim("scope", "flowforge.admin"));
+        return scoped("user", "flowforge.admin");
     }
 
     public static RequestPostProcessor openIdOnly() {
-        return jwt().jwt(token -> token.claim("scope", "openid"));
+        return scoped("user", "openid");
     }
 
     public static RequestPostProcessor realmUser() {
         return jwt()
                 .jwt(token -> token
+                        .subject("user")
+                        .issuer(ISSUER)
                         .claim("scope", "openid")
                         .claim("realm_access", Map.of("roles", List.of("flowforge-user"))))
                 .authorities(FlowforgeAuthorities::from);
+    }
+
+    private static RequestPostProcessor scoped(String subject, String scope) {
+        return jwt().jwt(token -> token
+                .subject(subject)
+                .issuer(ISSUER)
+                .claim("scope", scope));
     }
 
     public static RequestPostProcessor clearAuthentication() {
@@ -60,6 +69,7 @@ public final class TestAccess {
             RSAPrivateKey key = privateKey();
             JWTClaimsSet claims = new JWTClaimsSet.Builder()
                     .issuer(issuer)
+                    .subject("user")
                     .audience(audience)
                     .expirationTime(Date.from(Instant.now().plusSeconds(300)))
                     .claim("scope", scope)

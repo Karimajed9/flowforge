@@ -3,6 +3,7 @@ package com.karimmajed.flowforge.controller;
 import com.karimmajed.flowforge.security.TestAccess;
 import com.karimmajed.flowforge.service.ExecutionAbandonmentService;
 import com.karimmajed.flowforge.service.ExecutionRecoveryService;
+import com.karimmajed.flowforge.service.WorkflowOwnership;
 
 import org.junit.jupiter.api.Test;
 
@@ -32,6 +33,9 @@ class ExecutionRecoveryControllerBlankTokenTest {
 
     @MockitoBean
     private ExecutionAbandonmentService abandonment;
+
+    @MockitoBean
+    private WorkflowOwnership ownership;
 
     @Test
     void blankConfiguredTokenIsForbidden() throws Exception {

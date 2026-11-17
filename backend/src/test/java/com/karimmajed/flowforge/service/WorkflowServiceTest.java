@@ -3,6 +3,7 @@ package com.karimmajed.flowforge.service;
 import com.karimmajed.flowforge.dto.WebhookTokenResponse;
 import com.karimmajed.flowforge.entity.Workflow;
 import com.karimmajed.flowforge.repository.WorkflowRepository;
+import com.karimmajed.flowforge.security.ResourceOwner;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
@@ -33,18 +34,23 @@ class WorkflowServiceTest {
     @InjectMocks
     private WorkflowService service;
 
+    private static final ResourceOwner OWNER =
+            new ResourceOwner("user", "http://auth.test/realms/flowforge");
+
     @Test
     void rotateWebhookToken_storesTheHashAndReturnsThePlaintextToken() {
         Workflow workflow = new Workflow("Onboarding", "New hire");
         workflow.setWebhookTokenHash("previous-hash");
-        when(repository.findById(4L)).thenReturn(Optional.of(workflow));
+        when(repository.findByIdAndOwnerSubjectAndOwnerIssuer(
+                4L, OWNER.subject(), OWNER.issuer())).thenReturn(Optional.of(workflow));
         when(webhookTokenService.generateToken()).thenReturn("plain-token");
         when(webhookTokenService.hashToken("plain-token")).thenReturn("new-hash");
 
-        WebhookTokenResponse response = service.rotateWebhookToken(4L);
+        WebhookTokenResponse response = service.rotateWebhookToken(4L, OWNER);
 
         InOrder order = inOrder(repository, webhookTokenService);
-        order.verify(repository).findById(4L);
+        order.verify(repository).findByIdAndOwnerSubjectAndOwnerIssuer(
+                4L, OWNER.subject(), OWNER.issuer());
         order.verify(webhookTokenService).generateToken();
         order.verify(webhookTokenService).hashToken("plain-token");
 
@@ -54,11 +60,12 @@ class WorkflowServiceTest {
 
     @Test
     void rotateWebhookToken_missingWorkflow_isNotFound() {
-        when(repository.findById(4L)).thenReturn(Optional.empty());
+        when(repository.findByIdAndOwnerSubjectAndOwnerIssuer(
+                4L, OWNER.subject(), OWNER.issuer())).thenReturn(Optional.empty());
 
         ResponseStatusException ex = assertThrows(
                 ResponseStatusException.class,
-                () -> service.rotateWebhookToken(4L));
+                () -> service.rotateWebhookToken(4L, OWNER));
 
         assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(ex.getReason()).isEqualTo("Workflow not found");

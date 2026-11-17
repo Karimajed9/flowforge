@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { MemoryRouter } from 'react-router'
 import { AppRoutes } from '../App.tsx'
@@ -197,6 +197,12 @@ test('workflow detail loads the workflow and ordered steps', async () => {
 
   renderAt('/workflows/4')
   expect(await screen.findByText('Loading workflow')).toBeTruthy()
+  await waitFor(() => {
+    expect(pending.map((gate) => gate.url).sort()).toEqual([
+      '/api/workflows/4',
+      '/api/workflows/4/steps',
+    ])
+  })
 
   for (const gate of pending) {
     if (gate.url === '/api/workflows/4') {

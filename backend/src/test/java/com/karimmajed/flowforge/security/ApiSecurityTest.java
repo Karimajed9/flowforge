@@ -13,7 +13,9 @@ import com.karimmajed.flowforge.service.DashboardReadService;
 import com.karimmajed.flowforge.service.ExecutionAbandonmentService;
 import com.karimmajed.flowforge.service.ExecutionRecoveryService;
 import com.karimmajed.flowforge.service.ExecutionStepHistoryService;
+import com.karimmajed.flowforge.security.ResourceOwner;
 import com.karimmajed.flowforge.service.WebhookService;
+import com.karimmajed.flowforge.service.WorkflowOwnership;
 import com.karimmajed.flowforge.service.WorkflowExecutionService;
 import com.karimmajed.flowforge.service.WorkflowService;
 
@@ -22,15 +24,19 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.OffsetDateTime;
 import java.util.List;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -78,6 +84,9 @@ class ApiSecurityTest {
     @MockitoBean
     private WebhookService webhooks;
 
+    @MockitoBean
+    private WorkflowOwnership ownership;
+
     @Test
     void unauthenticatedApiRequestIsUnauthorized() throws Exception {
         mockMvc.perform(get("/api/workflows").with(TestAccess.clearAuthentication()))
@@ -92,10 +101,12 @@ class ApiSecurityTest {
 
     @Test
     void userCanCallAPermittedApi() throws Exception {
-        when(workflows.getPage(0, 20)).thenReturn(new PageImpl<>(List.of()));
-        when(dashboardReads.overview()).thenReturn(new DashboardOverviewResponse(
+        when(workflows.getPage(eq(0), eq(20), any(ResourceOwner.class)))
+                .thenReturn(new PageImpl<>(List.of()));
+        when(dashboardReads.overview(any(ResourceOwner.class))).thenReturn(new DashboardOverviewResponse(
                 1, 1, 0, 0, 0, null, 7));
-        when(executions.getById(21L)).thenReturn(new WorkflowExecutionResponse(
+        when(executions.getById(eq(21L), any(ResourceOwner.class)))
+                .thenReturn(new WorkflowExecutionResponse(
                 21L,
                 4L,
                 ExecutionStatus.SUCCEEDED,
@@ -121,7 +132,7 @@ class ApiSecurityTest {
                         .header("X-Recovery-Key", "test-recovery-key"))
                 .andExpect(status().isForbidden());
 
-        verifyNoInteractions(workflows, recovery);
+        verifyNoInteractions(workflows, recovery, ownership);
     }
 
     @Test
@@ -133,6 +144,20 @@ class ApiSecurityTest {
                 .andExpect(jsonPath("$.executionId").value(21));
 
         verify(recovery).requestRecovery(21L);
+        verify(ownership).requireExecution(eq(21L), any(ResourceOwner.class));
+    }
+
+    @Test
+    void administratorCannotRecoverAnotherUsersExecution() throws Exception {
+        doThrow(new ResponseStatusException(HttpStatus.NOT_FOUND, "Execution not found"))
+                .when(ownership).requireExecution(eq(21L), any(ResourceOwner.class));
+
+        mockMvc.perform(post("/api/admin/executions/{id}/recover", 21)
+                        .with(TestAccess.admin())
+                        .header("X-Recovery-Key", "test-recovery-key"))
+                .andExpect(status().isNotFound());
+
+        verifyNoInteractions(recovery);
     }
 
     @Test
@@ -141,12 +166,13 @@ class ApiSecurityTest {
                         .with(TestAccess.admin()))
                 .andExpect(status().isForbidden());
 
-        verifyNoInteractions(recovery);
+        verifyNoInteractions(recovery, ownership);
     }
 
     @Test
     void keycloakRealmRoleGrantsUserAccessButNotAdmin() throws Exception {
-        when(workflows.getPage(0, 20)).thenReturn(new PageImpl<>(List.of()));
+        when(workflows.getPage(eq(0), eq(20), any(ResourceOwner.class)))
+                .thenReturn(new PageImpl<>(List.of()));
 
         mockMvc.perform(get("/api/workflows").with(TestAccess.realmUser()))
                 .andExpect(status().isOk());
@@ -190,7 +216,8 @@ class ApiSecurityTest {
 
     @Test
     void signedUserTokenIsAccepted() throws Exception {
-        when(workflows.getPage(0, 20)).thenReturn(new PageImpl<>(List.of()));
+        when(workflows.getPage(eq(0), eq(20), any(ResourceOwner.class)))
+                .thenReturn(new PageImpl<>(List.of()));
         String token = TestAccess.signedToken(
                 TestAccess.ISSUER,
                 TestAccess.AUDIENCE,

@@ -3,6 +3,7 @@ package com.karimmajed.flowforge.service;
 import com.karimmajed.flowforge.dto.DashboardOverviewResponse;
 import com.karimmajed.flowforge.dto.RecentExecutionResponse;
 import com.karimmajed.flowforge.enums.ExecutionStatus;
+import com.karimmajed.flowforge.security.ResourceOwner;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -31,7 +32,7 @@ public class DashboardReadService {
     }
 
     @Transactional(readOnly = true)
-    public DashboardOverviewResponse overview() {
+    public DashboardOverviewResponse overview(ResourceOwner owner) {
         OffsetDateTime windowStart = OffsetDateTime.now(ZoneOffset.UTC)
                 .minusDays(SUCCESS_RATE_WINDOW_DAYS);
 
@@ -40,22 +41,29 @@ public class DashboardReadService {
                     COUNT(*) AS total_workflows,
                     COUNT(*) FILTER (WHERE active) AS active_workflows
                 FROM workflows
+                WHERE owner_subject = ?
+                  AND owner_issuer = ?
                 """,
                 (rs, row) -> new long[] {
                     rs.getLong("total_workflows"),
                     rs.getLong("active_workflows")
-                });
+                },
+                owner.subject(),
+                owner.issuer());
 
         long[] executions = jdbc.queryForObject("""
                 SELECT
                     COUNT(*) AS total_executions,
                     COUNT(*) FILTER (
-                        WHERE status = 'SUCCEEDED' AND created_at >= ?
+                        WHERE e.status = 'SUCCEEDED' AND e.created_at >= ?
                     ) AS succeeded_executions,
                     COUNT(*) FILTER (
-                        WHERE status = 'FAILED' AND created_at >= ?
+                        WHERE e.status = 'FAILED' AND e.created_at >= ?
                     ) AS failed_executions
-                FROM workflow_executions
+                FROM workflow_executions e
+                JOIN workflows w ON w.id = e.workflow_id
+                WHERE w.owner_subject = ?
+                  AND w.owner_issuer = ?
                 """,
                 (rs, row) -> new long[] {
                     rs.getLong("total_executions"),
@@ -63,7 +71,9 @@ public class DashboardReadService {
                     rs.getLong("failed_executions")
                 },
                 windowStart,
-                windowStart);
+                windowStart,
+                owner.subject(),
+                owner.issuer());
 
         if (workflows == null || executions == null) {
             throw new IllegalStateException("Dashboard counts did not return a row");
@@ -88,7 +98,10 @@ public class DashboardReadService {
     }
 
     @Transactional(readOnly = true)
-    public Page<RecentExecutionResponse> recentExecutions(int page, int size) {
+    public Page<RecentExecutionResponse> recentExecutions(
+            int page,
+            int size,
+            ResourceOwner owner) {
         if (page < 0 || size < 1 || size > 100) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
@@ -96,9 +109,16 @@ public class DashboardReadService {
             );
         }
 
-        Long total = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM workflow_executions",
-                Long.class);
+        Long total = jdbc.queryForObject("""
+                SELECT COUNT(*)
+                FROM workflow_executions e
+                JOIN workflows w ON w.id = e.workflow_id
+                WHERE w.owner_subject = ?
+                  AND w.owner_issuer = ?
+                """,
+                Long.class,
+                owner.subject(),
+                owner.issuer());
         long offset = (long) page * size;
         List<RecentExecutionResponse> rows = jdbc.query("""
                 SELECT
@@ -110,10 +130,14 @@ public class DashboardReadService {
                     e.failure_reason
                 FROM workflow_executions e
                 JOIN workflows w ON w.id = e.workflow_id
+                WHERE w.owner_subject = ?
+                  AND w.owner_issuer = ?
                 ORDER BY e.created_at DESC, e.id DESC
                 LIMIT ? OFFSET ?
                 """,
                 this::mapRecentExecution,
+                owner.subject(),
+                owner.issuer(),
                 size,
                 offset);
 

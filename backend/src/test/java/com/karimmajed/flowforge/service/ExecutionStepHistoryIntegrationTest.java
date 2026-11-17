@@ -2,6 +2,7 @@ package com.karimmajed.flowforge.service;
 
 import com.karimmajed.flowforge.dto.ExecutionStepResponse;
 import com.karimmajed.flowforge.enums.ExecutionStepStatus;
+import com.karimmajed.flowforge.security.ResourceOwner;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,6 +38,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @Testcontainers
 class ExecutionStepHistoryIntegrationTest {
+
+    private static final ResourceOwner OWNER = new ResourceOwner(
+            "history-user",
+            "http://auth.test/realms/flowforge");
 
     private static final String ATTEMPT_TOKEN = "attempt-token-secret-do-not-leak";
 
@@ -84,7 +89,7 @@ class ExecutionStepHistoryIntegrationTest {
         checkpoint(executionId, second, "SUCCEEDED", 1, null, STARTED, UPDATED);
         checkpoint(executionId, third, "SUCCEEDED", 1, null, STARTED, UPDATED);
 
-        List<ExecutionStepResponse> steps = history.getSteps(executionId);
+        List<ExecutionStepResponse> steps = history.getSteps(executionId, OWNER);
 
         assertThat(steps).extracting(ExecutionStepResponse::stepId)
                 .containsExactly(first, second, third);
@@ -112,7 +117,7 @@ class ExecutionStepHistoryIntegrationTest {
         checkpoint(executionId, first, "SUCCEEDED", 1, null, STARTED, UPDATED);
         checkpoint(executionId, second, "FAILED", 1, "HTTP status 404", STARTED, UPDATED);
 
-        List<ExecutionStepResponse> steps = history.getSteps(executionId);
+        List<ExecutionStepResponse> steps = history.getSteps(executionId, OWNER);
 
         assertThat(steps).extracting(ExecutionStepResponse::name)
                 .containsExactly("Order", "Notify", "Customer");
@@ -140,7 +145,7 @@ class ExecutionStepHistoryIntegrationTest {
         checkpoint(executionId, first, "SUCCEEDED", 1, null, STARTED, UPDATED);
         checkpoint(executionId, second, "RUNNING", 1, null, STARTED, STARTED);
 
-        List<ExecutionStepResponse> steps = history.getSteps(executionId);
+        List<ExecutionStepResponse> steps = history.getSteps(executionId, OWNER);
 
         assertThat(steps).hasSize(2);
         assertThat(steps.get(0).status()).isEqualTo(ExecutionStepStatus.SUCCEEDED);
@@ -168,7 +173,7 @@ class ExecutionStepHistoryIntegrationTest {
                 """,
                 executionId,
                 first);
-        assertThat(history.getSteps(executionId).get(0).leaseUntil()).isNull();
+        assertThat(history.getSteps(executionId, OWNER).get(0).leaseUntil()).isNull();
         assertUnchanged(executionId, "RUNNING");
         assertThat(checkpointStatus(executionId, second)).isEqualTo("RUNNING");
     }
@@ -178,14 +183,14 @@ class ExecutionStepHistoryIntegrationTest {
         long workflowId = insertWorkflow();
         long executionId = insertExecution(workflowId, "FAILED");
 
-        assertThat(history.getSteps(executionId)).isEmpty();
+        assertThat(history.getSteps(executionId, OWNER)).isEmpty();
     }
 
     @Test
     void missingExecutionIsNotFound() {
         ResponseStatusException ex = assertThrows(
                 ResponseStatusException.class,
-                () -> history.getSteps(9_999_999L));
+                () -> history.getSteps(9_999_999L, OWNER));
 
         assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(ex.getReason()).isEqualTo("Execution not found");
@@ -223,12 +228,14 @@ class ExecutionStepHistoryIntegrationTest {
 
     private long insertWorkflow() {
         return jdbc.queryForObject("""
-                INSERT INTO workflows (name, active)
-                VALUES (?, TRUE)
+                INSERT INTO workflows (name, active, owner_subject, owner_issuer)
+                VALUES (?, TRUE, ?, ?)
                 RETURNING id
                 """,
                 Long.class,
-                "History " + UUID.randomUUID());
+                "History " + UUID.randomUUID(),
+                OWNER.subject(),
+                OWNER.issuer());
     }
 
     private long insertStep(

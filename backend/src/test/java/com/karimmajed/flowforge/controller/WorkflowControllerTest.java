@@ -2,6 +2,7 @@ package com.karimmajed.flowforge.controller;
 
 import com.karimmajed.flowforge.dto.WebhookTokenResponse;
 import com.karimmajed.flowforge.dto.WorkflowResponse;
+import com.karimmajed.flowforge.security.ResourceOwner;
 import com.karimmajed.flowforge.service.WorkflowService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +17,8 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.OffsetDateTime;
 import java.util.List;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -34,19 +37,21 @@ class WorkflowControllerTest {
 
     @Test
     void rotateWebhookToken_returnsThePlaintextToken() throws Exception {
-        when(service.rotateWebhookToken(4L)).thenReturn(new WebhookTokenResponse("plain-token"));
+        when(service.rotateWebhookToken(eq(4L), any(ResourceOwner.class)))
+                .thenReturn(new WebhookTokenResponse("plain-token"));
 
         mockMvc.perform(post("/api/workflows/{id}/webhook-token", 4))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.token").value("plain-token"))
                 .andExpect(jsonPath("$.webhookTokenHash").doesNotExist());
 
-        verify(service).rotateWebhookToken(4L);
+        verify(service).rotateWebhookToken(eq(4L), any(ResourceOwner.class));
     }
 
     @Test
     void rotateWebhookToken_missingWorkflow_isNotFound() throws Exception {
-        when(service.rotateWebhookToken(99L)).thenThrow(new ResponseStatusException(
+        when(service.rotateWebhookToken(eq(99L), any(ResourceOwner.class)))
+                .thenThrow(new ResponseStatusException(
                 HttpStatus.NOT_FOUND,
                 "Workflow not found"));
 
@@ -62,7 +67,8 @@ class WorkflowControllerTest {
                 null,
                 true,
                 OffsetDateTime.parse("2026-11-16T15:00:00Z"));
-        when(service.getPage(0, 20)).thenReturn(new PageImpl<>(
+        when(service.getPage(eq(0), eq(20), any(ResourceOwner.class)))
+                .thenReturn(new PageImpl<>(
                 List.of(workflow),
                 PageRequest.of(0, 20),
                 1));
@@ -76,12 +82,13 @@ class WorkflowControllerTest {
                 .andExpect(jsonPath("$.size").value(20))
                 .andExpect(jsonPath("$.number").value(0));
 
-        verify(service).getPage(0, 20);
+        verify(service).getPage(eq(0), eq(20), any(ResourceOwner.class));
     }
 
     @Test
     void getWorkflowsRejectsAnOversizedPage() throws Exception {
-        when(service.getPage(0, 101)).thenThrow(new ResponseStatusException(
+        when(service.getPage(eq(0), eq(101), any(ResourceOwner.class)))
+                .thenThrow(new ResponseStatusException(
                 HttpStatus.BAD_REQUEST,
                 "Page must be >= 0 and size must be between 1 and 100"));
 
