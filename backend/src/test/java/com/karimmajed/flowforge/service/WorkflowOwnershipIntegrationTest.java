@@ -639,6 +639,18 @@ class WorkflowOwnershipIntegrationTest {
                 owner == null ? null : owner.issuer());
     }
 
+    @Test
+    void springSessionTablesExistInTheApplicationDatabase() {
+        Integer sessions = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM spring_session",
+                Integer.class);
+        Integer attributes = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM spring_session_attributes",
+                Integer.class);
+        assertThat(sessions).isZero();
+        assertThat(attributes).isZero();
+    }
+
     private long insertExecution(long workflowId, String status) {
         return insertExecution(workflowId, status, OffsetDateTime.now(ZoneOffset.UTC));
     }

@@ -1,6 +1,14 @@
 server:
   address: 127.0.0.1
   port: 8080
+  servlet:
+    session:
+      cookie:
+        # Spring Session writes this cookie. HttpOnly and SameSite=Lax.
+        # Secure is not forced: it is set only when the request is HTTPS.
+        name: SESSION
+        http-only: true
+        same-site: lax
 
 spring:
   application:
@@ -44,6 +52,12 @@ spring:
           multiplier: 2
           max-interval: 5s
 
+  session:
+    timeout: 30m
+    jdbc:
+      # Flyway V14 creates SPRING_SESSION. Do not run a second initializer.
+      initialize-schema: never
+
 management:
   endpoints:
     web:
@@ -77,6 +91,12 @@ flowforge:
     # Empty in production. Tests set a classpath public key so they do not
     # call an identity provider. Do not point this at a production key.
     public-key-location: ${FLOWFORGE_OIDC_PUBLIC_KEY_LOCATION:}
+    # Confidential BFF client. The secret is empty unless the environment
+    # sets it. Do not put a real secret in this file. Both modes are active:
+    # Authorization: Bearer stays the stateless resource server the current
+    # React app uses, and a browser without that header uses the OIDC session.
+    client-id: ${FLOWFORGE_OIDC_CLIENT_ID:flowforge-bff}
+    client-secret: ${FLOWFORGE_OIDC_CLIENT_SECRET:}
 
   http-get:
     connect-timeout: 2s

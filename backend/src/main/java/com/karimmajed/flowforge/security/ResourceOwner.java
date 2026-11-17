@@ -1,9 +1,9 @@
 package com.karimmajed.flowforge.security;
 
 /**
- * The caller who owns a workflow. Both values come from the validated
- * access token. The issuer is part of the identity so two issuers cannot
- * share a subject.
+ * The caller who owns a workflow. Both values come from the authenticated
+ * identity: a bearer JWT, or the ID token of a server-side OIDC login.
+ * The issuer is part of the identity so two issuers cannot share a subject.
  */
 public record ResourceOwner(String subject, String issuer) {
 
