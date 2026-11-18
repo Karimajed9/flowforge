@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
-import { MemoryRouter } from 'react-router'
-import { AppRoutes } from '../App.tsx'
+import { renderApp } from '../test/renderApp.tsx'
 import { buildHttpRequestConfiguration } from '../lib/workflowForm.ts'
 
 afterEach(() => {
@@ -20,11 +19,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 function renderAt(path: string) {
-  return render(
-    <MemoryRouter initialEntries={[path]}>
-      <AppRoutes />
-    </MemoryRouter>,
-  )
+  return renderApp(path)
 }
 
 function workflow(overrides: Record<string, unknown> = {}) {
@@ -448,8 +443,12 @@ test('a bare conflict is not treated as a duplicate position', async () => {
   fireEvent.change(textArea('field-step-fields'), { target: { value: 'email' } })
   fireEvent.click(screen.getByRole('button', { name: 'Add field check' }))
 
-  expect(await screen.findByText('Request failed (409)')).toBeTruthy()
+  expect(await screen.findByText('The step was not added')).toBeTruthy()
+  expect(screen.queryByText('Request failed (409)')).toBeNull()
   expect(screen.queryByText('A step already uses this position. Choose another one.')).toBeNull()
+  expect(
+    screen.queryByText('This workflow was changed elsewhere. Refresh the page and try again.'),
+  ).toBeNull()
   expect(input('field-step-name').value).toBe('Check fields')
   expect(input('field-step-position').value).toBe('1')
   expect(textArea('field-step-fields').value).toBe('email')

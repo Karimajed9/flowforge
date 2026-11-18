@@ -242,6 +242,59 @@ class WorkflowEditorIntegrationTest {
     }
 
     @Test
+    void reorderNearTheIntegerLimitIsRepeatableAndAStaleEditRollsBack() {
+        Boolean deferrable = jdbc.queryForObject(
+                """
+                SELECT condeferrable
+                FROM pg_constraint
+                WHERE conname = 'uq_workflow_step_position'
+                """,
+                Boolean.class);
+        assertThat(deferrable).isTrue();
+
+        WorkflowResponse workflow = workflow("Large ids");
+        long low = 2_147_483_646L;
+        long high = 2_147_483_647L;
+        insertStep(workflow.id(), low, "Low", 1);
+        insertStep(workflow.id(), high, "High", 2);
+
+        var swapped = steps.reorder(
+                workflow.id(),
+                new ReorderWorkflowStepsRequest(List.of(high, low), 0L),
+                OWNER);
+        assertThat(swapped.stepRevision()).isEqualTo(1L);
+        assertThat(swapped.steps()).extracting(WorkflowStepResponse::name)
+                .containsExactly("High", "Low");
+        assertThat(swapped.steps()).extracting(WorkflowStepResponse::position)
+                .containsExactly(1, 2);
+        assertThat(swapped.steps()).extracting(WorkflowStepResponse::id)
+                .containsExactly(high, low);
+
+        var restored = steps.reorder(
+                workflow.id(),
+                new ReorderWorkflowStepsRequest(List.of(low, high), swapped.stepRevision()),
+                OWNER);
+        assertThat(restored.stepRevision()).isEqualTo(2L);
+        assertThat(restored.steps()).extracting(WorkflowStepResponse::name)
+                .containsExactly("Low", "High");
+        assertThat(restored.steps()).extracting(WorkflowStepResponse::position)
+                .containsExactly(1, 2);
+
+        assertThatThrownBy(() -> steps.reorder(
+                workflow.id(),
+                new ReorderWorkflowStepsRequest(List.of(high, low), swapped.stepRevision()),
+                OWNER))
+                .isInstanceOf(StepChangeException.class)
+                .hasMessage("This workflow changed. Refresh and try again.");
+        assertThat(names(workflow.id())).containsExactly("Low", "High");
+        assertThat(revision(workflow.id())).isEqualTo(2L);
+        assertThat(jdbc.queryForObject(
+                "SELECT MAX(position) FROM workflow_steps WHERE workflow_id = ?",
+                Integer.class,
+                workflow.id())).isEqualTo(2);
+    }
+
+    @Test
     void aStaleRevisionDoesNotOverwrite() {
         WorkflowResponse workflow = workflow("Checks");
         WorkflowStepResponse step = steps.create(workflow.id(), validation("Email", 1, "email"), OWNER);
@@ -434,6 +487,21 @@ class WorkflowEditorIntegrationTest {
                 """,
                 Integer.class,
                 executionId);
+    }
+
+    private void insertStep(long workflowId, long stepId, String name, int position) {
+        jdbc.update(
+                """
+                INSERT INTO workflow_steps (
+                    id, workflow_id, name, step_type, position, configuration
+                )
+                VALUES (?, ?, ?, 'VALIDATE_FIELDS', ?, CAST(? AS jsonb))
+                """,
+                stepId,
+                workflowId,
+                name,
+                position,
+                "{\"requiredFields\":[\"email\"]}");
     }
 
     private String snapshotName(long executionId) {

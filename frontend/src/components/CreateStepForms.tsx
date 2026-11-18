@@ -2,6 +2,8 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { ApiError } from '../api/errors.ts'
 import { createWorkflowStep } from '../api/client.ts'
+import { isPositionConflict, POSITION_TAKEN, usableReason } from './editorFeedback.ts'
+import { useReportDirty } from './unsavedNavigation.ts'
 import {
   buildHttpRequestConfiguration,
   parseName,
@@ -13,20 +15,18 @@ import type { WorkflowStep } from '../types/workflow.ts'
 const fieldClass =
   'w-full rounded-lg border border-line bg-navy-800 px-3 py-2 text-sm text-ink'
 
-const POSITION_TAKEN = 'A step already uses this position. Choose another one.'
-
 function addStepError(caught: unknown): string {
   if (!(caught instanceof ApiError)) {
     return 'The step was not added'
   }
-  if (
-    caught.status === 409 &&
-    (caught.title === 'Workflow step position conflict' ||
-      caught.message === 'A step already exists at this position')
-  ) {
+  if (isPositionConflict(caught)) {
     return POSITION_TAKEN
   }
-  return caught.message
+  const reason = usableReason(caught.message)
+  if (caught.status === 409 && !reason) {
+    return 'The step was not added'
+  }
+  return reason ?? 'The step was not added'
 }
 
 export function CreateStepForms({
@@ -56,6 +56,7 @@ function ValidateFieldsForm({
   const [fields, setFields] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
+  useReportDirty('add-field-check', name !== '' || position !== '' || fields !== '')
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -163,6 +164,7 @@ function HttpGetForm({
   const [url, setUrl] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
+  useReportDirty('add-https-get', name !== '' || position !== '' || url !== '')
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()

@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
-import { MemoryRouter } from 'react-router'
-import { AppRoutes } from '../App.tsx'
+import { renderApp, renderRouter } from '../test/renderApp.tsx'
+import { STALE_ELSEWHERE } from '../components/editorFeedback.ts'
+import { UNSAVED_NAVIGATION } from '../components/unsavedNavigation.ts'
 
 afterEach(() => {
   cleanup()
@@ -20,11 +21,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 function renderAt(path: string) {
-  return render(
-    <MemoryRouter initialEntries={[path]}>
-      <AppRoutes />
-    </MemoryRouter>,
-  )
+  return renderApp(path)
 }
 
 const workflow = {
@@ -386,4 +383,337 @@ test('save shows a loading state until the response arrives', async () => {
     }),
   )
   expect(await screen.findByRole('heading', { name: 'Customer email' })).toBeTruthy()
+})
+
+test('an empty conflict on save says the workflow changed elsewhere', async () => {
+  installFetch((call) => {
+    if (call.method === 'PATCH') {
+      return new Response(null, { status: 409 })
+    }
+    return json({ detail: 'Not found' }, 404)
+  })
+
+  renderAt('/workflows/4')
+  expect(await screen.findByRole('heading', { name: 'Check fields' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Check fields' }))
+  const name = document.getElementById('step-name-3') as HTMLInputElement
+  fireEvent.change(name, { target: { value: 'Customer email' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', STALE_ELSEWHERE)
+  expect(screen.queryByText('Request failed (409)')).toBeNull()
+  expect(name.value).toBe('Customer email')
+})
+
+test('a conflict without a reason on save says the workflow changed elsewhere', async () => {
+  installFetch((call) => {
+    if (call.method === 'PATCH') {
+      return json({ timestamp: '2026-11-17T00:00:00Z', status: 409, error: 'Conflict' }, 409)
+    }
+    return json({ detail: 'Not found' }, 404)
+  })
+
+  renderAt('/workflows/4')
+  expect(await screen.findByRole('heading', { name: 'Check fields' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Check fields' }))
+  fireEvent.change(document.getElementById('step-name-3') as HTMLInputElement, {
+    target: { value: 'Customer email' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', STALE_ELSEWHERE)
+})
+
+test('a structured reorder conflict keeps the server message', async () => {
+  installFetch((call) => {
+    if (call.method === 'PUT') {
+      return json(
+        {
+          title: 'Step definition conflict',
+          detail: 'The step list does not match this workflow.',
+        },
+        409,
+      )
+    }
+    return json({ detail: 'Not found' }, 404)
+  })
+
+  renderAt('/workflows/4')
+  expect(await screen.findByRole('heading', { name: 'Check fields' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Move Call API up' }))
+
+  expect(await screen.findByRole('alert')).toHaveProperty(
+    'textContent',
+    'The step list does not match this workflow.',
+  )
+  expect(screen.queryByText(STALE_ELSEWHERE)).toBeNull()
+})
+
+test('browser back and forward ask once and cancel keeps the step draft', async () => {
+  installFetch(() => json({ detail: 'Not found' }, 404))
+  const confirm = vi.fn(() => false)
+  window.confirm = confirm
+  const { router } = renderRouter(['/workflows', '/workflows/4'])
+
+  expect(await screen.findByRole('heading', { name: 'Check fields' })).toBeTruthy()
+  const clean = router.navigate(-1)
+  await clean
+  expect(confirm).not.toHaveBeenCalled()
+  expect(router.state.location.pathname).toBe('/workflows')
+
+  await router.navigate(1)
+  expect(router.state.location.pathname).toBe('/workflows/4')
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Check fields' }))
+  const name = document.getElementById('step-name-3') as HTMLInputElement
+  fireEvent.change(name, { target: { value: 'Customer email' } })
+
+  const blocked = router.navigate(-1)
+  await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1))
+  expect(confirm).toHaveBeenCalledWith(UNSAVED_NAVIGATION)
+  await blocked
+  expect(router.state.location.pathname).toBe('/workflows/4')
+  expect(name.value).toBe('Customer email')
+})
+
+test('browser forward asks once and cancel keeps the new workflow draft', async () => {
+  installFetch((call) => {
+    if (call.url.startsWith('/api/workflows') && call.method === 'GET' && !call.url.includes('/4')) {
+      return json({
+        content: [],
+        totalElements: 0,
+        totalPages: 0,
+        size: 20,
+        number: 0,
+        empty: true,
+      })
+    }
+    return json({ detail: 'Not found' }, 404)
+  })
+  const confirm = vi.fn(() => false)
+  window.confirm = confirm
+  const { router } = renderRouter(['/workflows', '/workflows/4'], { index: 0 })
+
+  const name = (await screen.findByLabelText('Name')) as HTMLInputElement
+  const unloaded = new Event('beforeunload', { cancelable: true })
+  window.dispatchEvent(unloaded)
+  expect(unloaded.defaultPrevented).toBe(false)
+
+  fireEvent.change(name, { target: { value: 'Payroll' } })
+  const blocked = router.navigate(1)
+  await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1))
+  expect(confirm).toHaveBeenCalledWith(UNSAVED_NAVIGATION)
+  await blocked
+  expect(router.state.location.pathname).toBe('/workflows')
+  expect(name.value).toBe('Payroll')
+
+  confirm.mockReturnValue(true)
+  const leaving = router.navigate(1)
+  await waitFor(() => expect(confirm).toHaveBeenCalledTimes(2))
+  await leaving
+  expect(router.state.location.pathname).toBe('/workflows/4')
+})
+
+test('a link is blocked once while a new workflow is unsaved and not after it is created', async () => {
+  const calls = installFetch((call) => {
+    if (call.method === 'POST' && call.url === '/api/workflows') {
+      return json({
+        id: 8,
+        name: 'Payroll',
+        description: null,
+        active: true,
+        createdAt: '2026-11-17T00:00:00Z',
+        stepRevision: 0,
+      })
+    }
+    if (call.url === '/api/workflows/8' && call.method === 'GET') {
+      return json({
+        id: 8,
+        name: 'Payroll',
+        description: null,
+        active: true,
+        createdAt: '2026-11-17T00:00:00Z',
+        stepRevision: 0,
+      })
+    }
+    if (call.url === '/api/workflows/8/steps') {
+      return json([])
+    }
+    if (call.url.startsWith('/api/workflows')) {
+      return json({
+        content: [],
+        totalElements: 0,
+        totalPages: 0,
+        size: 20,
+        number: 0,
+        empty: true,
+      })
+    }
+    return json({ detail: 'Not found' }, 404)
+  })
+  const confirm = vi.fn(() => false)
+  window.confirm = confirm
+  renderAt('/workflows')
+
+  const name = await screen.findByLabelText('Name')
+  fireEvent.change(name, { target: { value: 'Payroll' } })
+  fireEvent.click(screen.getByRole('link', { name: 'Overview' }))
+  await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1))
+  expect(confirm).toHaveBeenCalledWith(UNSAVED_NAVIGATION)
+  expect((name as HTMLInputElement).value).toBe('Payroll')
+  expect(calls.some((call) => call.method === 'POST')).toBe(false)
+
+  fireEvent.click(screen.getByRole('button', { name: 'Create workflow' }))
+  expect(await screen.findByRole('heading', { name: 'Payroll' })).toBeTruthy()
+  expect(confirm).toHaveBeenCalledTimes(1)
+})
+
+test('refresh is warned only while a step draft is unsaved', async () => {
+  installFetch((call) => {
+    if (call.method === 'PATCH') {
+      return json({
+        step: { ...steps[0], name: 'Customer email' },
+        stepRevision: 4,
+      })
+    }
+    return json({ detail: 'Not found' }, 404)
+  })
+  renderAt('/workflows/4')
+  expect(await screen.findByRole('heading', { name: 'Check fields' })).toBeTruthy()
+
+  const clean = new Event('beforeunload', { cancelable: true })
+  window.dispatchEvent(clean)
+  expect(clean.defaultPrevented).toBe(false)
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Check fields' }))
+  fireEvent.change(document.getElementById('step-name-3') as HTMLInputElement, {
+    target: { value: 'Customer email' },
+  })
+  const dirty = new Event('beforeunload', { cancelable: true })
+  window.dispatchEvent(dirty)
+  expect(dirty.defaultPrevented).toBe(true)
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  expect(await screen.findByRole('heading', { name: 'Customer email' })).toBeTruthy()
+  const saved = new Event('beforeunload', { cancelable: true })
+  window.dispatchEvent(saved)
+  expect(saved.defaultPrevented).toBe(false)
+})
+
+function leaveBlocked(): boolean {
+  const event = new Event('beforeunload', { cancelable: true })
+  window.dispatchEvent(event)
+  return event.defaultPrevented
+}
+
+test('editing a field marks the form dirty', async () => {
+  installFetch(() => json({ detail: 'Not found' }, 404))
+  renderAt('/workflows/4')
+  expect(await screen.findByRole('heading', { name: 'Check fields' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Check fields' }))
+  expect(leaveBlocked()).toBe(false)
+
+  fireEvent.change(document.getElementById('step-name-3') as HTMLInputElement, {
+    target: { value: 'Customer email' },
+  })
+  expect(leaveBlocked()).toBe(true)
+})
+
+test('restoring the original value clears dirty', async () => {
+  installFetch(() => json({ detail: 'Not found' }, 404))
+  renderAt('/workflows/4')
+  expect(await screen.findByRole('heading', { name: 'Call API' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Call API' }))
+  const url = document.getElementById('step-url-9') as HTMLInputElement
+  fireEvent.change(url, { target: { value: 'https://example.com/orders' } })
+  expect(leaveBlocked()).toBe(true)
+
+  fireEvent.change(url, { target: { value: 'https://example.com/hook' } })
+  expect(leaveBlocked()).toBe(false)
+})
+
+test('restoring several edited fields clears dirty only after all values match', async () => {
+  installFetch(() => json({ detail: 'Not found' }, 404))
+  const confirm = vi.fn(() => false)
+  window.confirm = confirm
+  const { router } = renderRouter(['/workflows', '/workflows/4'])
+  expect(await screen.findByRole('heading', { name: 'Check fields' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Check fields' }))
+  fireEvent.change(document.getElementById('step-name-3') as HTMLInputElement, {
+    target: { value: 'Customer email' },
+  })
+  fireEvent.change(document.getElementById('step-fields-3') as HTMLTextAreaElement, {
+    target: { value: 'email, name' },
+  })
+  expect(leaveBlocked()).toBe(true)
+
+  fireEvent.change(document.getElementById('step-name-3') as HTMLInputElement, {
+    target: { value: 'Check fields' },
+  })
+  expect(leaveBlocked()).toBe(true)
+  const blocked = router.navigate(-1)
+  await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1))
+  await blocked
+  expect(router.state.location.pathname).toBe('/workflows/4')
+
+  fireEvent.change(document.getElementById('step-fields-3') as HTMLTextAreaElement, {
+    target: { value: 'email' },
+  })
+  expect(leaveBlocked()).toBe(false)
+  await router.navigate(-1)
+  expect(confirm).toHaveBeenCalledTimes(1)
+  expect(router.state.location.pathname).toBe('/workflows')
+})
+
+test('saving clears dirty and the saved step becomes the baseline', async () => {
+  installFetch((call) => {
+    if (call.method === 'PATCH') {
+      return json({
+        step: { ...steps[0], name: 'Customer email' },
+        stepRevision: 4,
+      })
+    }
+    return json({ detail: 'Not found' }, 404)
+  })
+  const confirm = vi.fn(() => false)
+  window.confirm = confirm
+  const { router } = renderRouter(['/workflows', '/workflows/4'])
+  expect(await screen.findByRole('heading', { name: 'Check fields' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Check fields' }))
+  fireEvent.change(document.getElementById('step-name-3') as HTMLInputElement, {
+    target: { value: 'Customer email' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  expect(await screen.findByRole('heading', { name: 'Customer email' })).toBeTruthy()
+  expect(leaveBlocked()).toBe(false)
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Customer email' }))
+  const name = document.getElementById('step-name-3') as HTMLInputElement
+  fireEvent.change(name, { target: { value: 'Check fields' } })
+  expect(leaveBlocked()).toBe(true)
+  fireEvent.change(name, { target: { value: 'Customer email' } })
+  expect(leaveBlocked()).toBe(false)
+  await router.navigate(-1)
+  expect(confirm).not.toHaveBeenCalled()
+  expect(router.state.location.pathname).toBe('/workflows')
+})
+
+test('invalid JSON does not clear dirty', async () => {
+  installFetch(() => json({ detail: 'Not found' }, 404))
+  renderAt('/workflows/4')
+  expect(await screen.findByRole('heading', { name: 'Check fields' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Check fields' }))
+  const fields = document.getElementById('step-fields-3') as HTMLTextAreaElement
+  fireEvent.change(fields, {
+    target: { value: '{\n  "requiredFields": ["email"]\n}' },
+  })
+  expect(leaveBlocked()).toBe(false)
+
+  fireEvent.change(document.getElementById('step-name-3') as HTMLInputElement, {
+    target: { value: 'Customer email' },
+  })
+  fireEvent.change(fields, { target: { value: '{' } })
+  fireEvent.change(document.getElementById('step-name-3') as HTMLInputElement, {
+    target: { value: 'Check fields' },
+  })
+  expect(leaveBlocked()).toBe(true)
 })

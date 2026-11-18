@@ -163,13 +163,7 @@ public class WorkflowStepService {
             throw conflict(LIST_MISMATCH);
         }
 
-        jdbc.update("""
-                UPDATE workflow_steps
-                SET position = 1000000 + CAST(id AS INTEGER)
-                WHERE workflow_id = ?
-                """,
-                workflowId);
-
+        deferPositionUniqueness();
         for (int index = 0; index < requested.size(); index++) {
             int updated = jdbc.update("""
                     UPDATE workflow_steps
@@ -197,6 +191,7 @@ public class WorkflowStepService {
     }
 
     private void renumber(Long workflowId) {
+        deferPositionUniqueness();
         jdbc.update("""
                 WITH ordered AS (
                     SELECT id,
@@ -205,18 +200,16 @@ public class WorkflowStepService {
                     WHERE workflow_id = ?
                 )
                 UPDATE workflow_steps AS step
-                SET position = ordered.next_position + 1000000
+                SET position = CAST(ordered.next_position AS INTEGER)
                 FROM ordered
                 WHERE step.id = ordered.id
+                  AND step.position <> ordered.next_position
                 """,
                 workflowId);
-        jdbc.update("""
-                UPDATE workflow_steps
-                SET position = position - 1000000
-                WHERE workflow_id = ?
-                  AND position > 1000000
-                """,
-                workflowId);
+    }
+
+    private void deferPositionUniqueness() {
+        jdbc.execute("SET CONSTRAINTS uq_workflow_step_position DEFERRED");
     }
 
     private boolean sameSteps(List<Long> current, List<Long> requested) {

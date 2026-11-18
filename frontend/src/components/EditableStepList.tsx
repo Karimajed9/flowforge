@@ -1,11 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { ApiError } from '../api/errors.ts'
+import { editorMutationMessage } from './editorFeedback.ts'
+import { useReportDirty } from './unsavedNavigation.ts'
 import {
   deleteWorkflowStep,
   reorderWorkflowSteps,
   updateWorkflowStep,
 } from '../api/client.ts'
+import { configurationText, stepDraftDiffers } from '../lib/stepDraft.ts'
 import {
   buildHttpRequestConfiguration,
   parseName,
@@ -37,12 +40,19 @@ export function EditableStepList({
   const [editingId, setEditingId] = useState<number | null>(null)
   const [draftName, setDraftName] = useState('')
   const [draftConfig, setDraftConfig] = useState('')
-  const [dirty, setDirty] = useState(false)
   const [confirmId, setConfirmId] = useState<number | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const editingStep = steps.find((step) => step.id === editingId) ?? null
+  const dirty =
+    editingStep !== null &&
+    stepDraftDiffers(editingStep, {
+      name: draftName,
+      stepType: editingStep.stepType,
+      configurationText: draftConfig,
+    })
 
-  useUnsavedWarning(dirty)
+  useReportDirty('step-editor', dirty)
 
   function guard(): boolean {
     if (!dirty) {
@@ -53,7 +63,6 @@ export function EditableStepList({
 
   function closeEditor() {
     setEditingId(null)
-    setDirty(false)
     setError(null)
   }
 
@@ -68,7 +77,6 @@ export function EditableStepList({
     setEditingId(step.id)
     setDraftName(step.name)
     setDraftConfig(configurationText(step))
-    setDirty(false)
     setError(null)
   }
 
@@ -95,7 +103,11 @@ export function EditableStepList({
       onChange(replaceStep(steps, saved.step), saved.stepRevision)
       closeEditor()
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'The step was not saved')
+      setError(
+        caught instanceof ApiError
+          ? editorMutationMessage(caught, 'The step was not saved')
+          : 'The step was not saved',
+      )
     } finally {
       setPending(false)
     }
@@ -112,7 +124,11 @@ export function EditableStepList({
         closeEditor()
       }
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'The step was not deleted')
+      setError(
+        caught instanceof ApiError
+          ? editorMutationMessage(caught, 'The step was not deleted')
+          : 'The step was not deleted',
+      )
     } finally {
       setPending(false)
     }
@@ -141,7 +157,11 @@ export function EditableStepList({
       closeEditor()
       setConfirmId(null)
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'The steps were not reordered')
+      setError(
+        caught instanceof ApiError
+          ? editorMutationMessage(caught, 'The steps were not reordered')
+          : 'The steps were not reordered',
+      )
     } finally {
       setPending(false)
     }
@@ -253,7 +273,6 @@ export function EditableStepList({
                         value={draftName}
                         onChange={(event) => {
                           setDraftName(event.target.value)
-                          setDirty(true)
                           setError(null)
                         }}
                         className={`${fieldClass} mt-2`}
@@ -268,7 +287,6 @@ export function EditableStepList({
                           rows={3}
                           onChange={(event) => {
                             setDraftConfig(event.target.value)
-                            setDirty(true)
                             setError(null)
                           }}
                           className={`${fieldClass} mt-2`}
@@ -282,7 +300,6 @@ export function EditableStepList({
                           value={draftConfig}
                           onChange={(event) => {
                             setDraftConfig(event.target.value)
-                            setDirty(true)
                             setError(null)
                           }}
                           className={`${fieldClass} mt-2`}
@@ -329,54 +346,10 @@ export function EditableStepList({
   )
 }
 
-function useUnsavedWarning(active: boolean) {
-  useEffect(() => {
-    if (!active) {
-      return
-    }
-    const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault()
-      event.returnValue = ''
-    }
-    const onClick = (event: MouseEvent) => {
-      const target = event.target
-      if (!(target instanceof Element)) {
-        return
-      }
-      const link = target.closest('a')
-      if (!link || link.target === '_blank') {
-        return
-      }
-      if (!window.confirm(UNSAVED)) {
-        event.preventDefault()
-        event.stopPropagation()
-      }
-    }
-    window.addEventListener('beforeunload', onBeforeUnload)
-    document.addEventListener('click', onClick, true)
-    return () => {
-      window.removeEventListener('beforeunload', onBeforeUnload)
-      document.removeEventListener('click', onClick, true)
-    }
-  }, [active])
-}
-
 function replaceStep(steps: WorkflowStep[], saved: WorkflowStep): WorkflowStep[] {
   return steps
     .map((step) => (step.id === saved.id ? saved : step))
     .sort((left, right) => left.position - right.position || left.id - right.id)
-}
-
-function configurationText(step: WorkflowStep): string {
-  if (step.stepType === 'VALIDATE_FIELDS') {
-    const fields = Array.isArray(step.configuration.requiredFields)
-      ? step.configuration.requiredFields.filter(
-          (field): field is string => typeof field === 'string',
-        )
-      : []
-    return fields.join(', ')
-  }
-  return typeof step.configuration.url === 'string' ? step.configuration.url : ''
 }
 
 function configurationFor(

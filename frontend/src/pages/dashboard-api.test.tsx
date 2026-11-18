@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
-import { MemoryRouter } from 'react-router'
-import { AppRoutes } from '../App.tsx'
+import { renderApp } from '../test/renderApp.tsx'
 import { formatTimestamp } from '../lib/format.ts'
 
 afterEach(() => {
@@ -18,11 +17,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 function renderAt(path: string) {
-  return render(
-    <MemoryRouter initialEntries={[path]}>
-      <AppRoutes />
-    </MemoryRouter>,
-  )
+  return renderApp(path)
 }
 
 function execution(overrides: Record<string, unknown> = {}) {

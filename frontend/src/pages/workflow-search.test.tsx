@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
-import { MemoryRouter, useLocation } from 'react-router'
-import { AppRoutes } from '../App.tsx'
+import { renderApp } from '../test/renderApp.tsx'
 
 afterEach(() => {
   cleanup()
@@ -67,18 +66,8 @@ function params(url: string) {
   return new URL(url, 'http://localhost').searchParams
 }
 
-function RouteLocation() {
-  const location = useLocation()
-  return <p data-testid="route-location">{`${location.pathname}${location.search}`}</p>
-}
-
 function renderAt(path: string) {
-  return render(
-    <MemoryRouter initialEntries={[path]}>
-      <AppRoutes />
-      <RouteLocation />
-    </MemoryRouter>,
-  )
+  return renderApp(path, { probe: true })
 }
 
 test('the workflows address restores search, status, and page', async () => {
