@@ -29,6 +29,9 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getStatusCode())
             .isEqualTo(HttpStatus.CONFLICT);
 
+        assertThat(response.getBody().getTitle())
+            .isEqualTo("Workflow step position conflict");
+
         assertThat(response.getBody().getDetail())
             .isEqualTo(
                 "A step already exists at this position"

@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import { MemoryRouter } from 'react-router'
-import { AppRoutes } from '../App.tsx'
+import { renderApp } from '../test/renderApp.tsx'
 import { clearCsrf } from './csrf.ts'
 
 vi.unmock('../auth/session.ts')
@@ -98,11 +97,7 @@ function installFetch(handler: (call: Call) => Response | Promise<Response>) {
 }
 
 function renderAt(path: string) {
-  return render(
-    <MemoryRouter initialEntries={[path]}>
-      <AppRoutes />
-    </MemoryRouter>,
-  )
+  return renderApp(path)
 }
 
 test('sign in navigates to the backend login endpoint', async () => {

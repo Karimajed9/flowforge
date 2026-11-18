@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router'
 import { ApiError } from '../api/errors.ts'
 import { createWorkflow } from '../api/client.ts'
 import { parseName } from '../lib/workflowForm.ts'
+import { useAllowNextNavigation, useReportDirty } from './unsavedNavigation.ts'
 
 const fieldClass =
   'w-full rounded-lg border border-line bg-navy-800 px-3 py-2 text-sm text-ink'
@@ -14,6 +15,8 @@ export function CreateWorkflowForm() {
   const [description, setDescription] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const allowNextNavigation = useAllowNextNavigation()
+  useReportDirty('create-workflow', name !== '' || description !== '')
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -30,6 +33,7 @@ export function CreateWorkflowForm() {
         name: parsedName.name,
         description: description.trim() === '' ? null : description.trim(),
       })
+      allowNextNavigation()
       navigate(`/workflows/${created.id}`)
     } catch (caught) {
       setError(

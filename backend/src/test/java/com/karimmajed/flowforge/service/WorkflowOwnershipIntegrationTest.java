@@ -67,6 +67,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         ExecutionStepHistoryService.class,
         WebhookTokenService.class,
         WebhookService.class,
+        ExecutionDefinitionStore.class,
         StepConfigurationValidator.class,
         ExecutionRecoveryService.class,
         ExecutionAbandonmentService.class,

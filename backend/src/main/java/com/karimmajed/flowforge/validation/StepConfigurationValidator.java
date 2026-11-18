@@ -18,7 +18,7 @@ import java.util.Set;
 public class StepConfigurationValidator {
 
     @FunctionalInterface
-    interface AddressLookup {
+    public interface AddressLookup {
         InetAddress[] resolve(String host) throws UnknownHostException;
     }
 
@@ -28,7 +28,7 @@ public class StepConfigurationValidator {
         this(InetAddress::getAllByName);
     }
 
-    StepConfigurationValidator(AddressLookup addressLookup) {
+    public StepConfigurationValidator(AddressLookup addressLookup) {
         this.addressLookup = addressLookup;
     }
 

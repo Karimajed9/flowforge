@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, screen } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
-import { MemoryRouter, useLocation } from 'react-router'
-import { AppRoutes } from '../App.tsx'
+import { renderApp } from '../test/renderApp.tsx'
 
 afterEach(() => {
   cleanup()
@@ -45,18 +44,8 @@ function execution(id = 21) {
   }
 }
 
-function RouteLocation() {
-  const location = useLocation()
-  return <p data-testid="route-location">{location.pathname}</p>
-}
-
 function renderAt(path: string) {
-  return render(
-    <MemoryRouter initialEntries={[path]}>
-      <AppRoutes />
-      <RouteLocation />
-    </MemoryRouter>,
-  )
+  return renderApp(path, { probe: true })
 }
 
 test('the editor validates JSON before starting a real execution', async () => {
@@ -544,6 +533,9 @@ test('an inactive workflow maps a detail-less 409 and keeps the payload', async 
   )
   expect(screen.queryByText('The workflow could not be started.')).toBeNull()
   expect(screen.queryByText('Conflict')).toBeNull()
+  expect(
+    screen.queryByText('This workflow was changed elsewhere. Refresh the page and try again.'),
+  ).toBeNull()
   expect(screen.getByLabelText('Payload')).toHaveProperty('value', '{"email":"karim@gmail.com"}')
 })
 
@@ -568,6 +560,9 @@ test('the same detail-less 409 stays generic when the workflow is active', async
     'The workflow could not be started.',
   )
   expect(screen.queryByText('This workflow is inactive. Activate it before running.')).toBeNull()
+  expect(
+    screen.queryByText('This workflow was changed elsewhere. Refresh the page and try again.'),
+  ).toBeNull()
   expect(screen.getByLabelText('Payload')).toHaveProperty('value', '{"email":"karim@gmail.com"}')
 })
 
@@ -600,4 +595,7 @@ test('an inactive workflow still prefers an explicit idempotency conflict', asyn
     'This submission key was previously used with different data.',
   )
   expect(screen.queryByText('This workflow is inactive. Activate it before running.')).toBeNull()
+  expect(
+    screen.queryByText('This workflow was changed elsewhere. Refresh the page and try again.'),
+  ).toBeNull()
 })

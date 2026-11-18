@@ -5,6 +5,7 @@ import com.karimmajed.flowforge.dto.WorkflowStepResponse;
 import com.karimmajed.flowforge.entity.Workflow;
 import com.karimmajed.flowforge.entity.WorkflowStep;
 import com.karimmajed.flowforge.enums.StepType;
+import com.karimmajed.flowforge.exception.StepChangeException;
 import com.karimmajed.flowforge.repository.WorkflowRepository;
 import com.karimmajed.flowforge.repository.WorkflowStepRepository;
 import com.karimmajed.flowforge.security.ResourceOwner;
@@ -17,6 +18,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.lang.reflect.Field;
@@ -28,6 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
@@ -46,6 +49,9 @@ class WorkflowStepServiceTest {
 
     @Mock
     private StepConfigurationValidator configurationValidator;
+
+    @Mock
+    private JdbcTemplate jdbc;
 
     @InjectMocks
     private WorkflowStepService service;
@@ -66,6 +72,7 @@ class WorkflowStepServiceTest {
                 configuration);
 
         when(workflowRepository.findByIdAndOwnerSubjectAndOwnerIssuer(8L, OWNER.subject(), OWNER.issuer())).thenReturn(Optional.of(workflow));
+        when(jdbc.update(anyString(), any(), any(), any(), any(), any())).thenReturn(1);
         when(stepRepository.save(any())).thenAnswer(invocation -> {
             WorkflowStep saved = invocation.getArgument(0);
             setId(saved, 15L);
@@ -133,12 +140,13 @@ class WorkflowStepServiceTest {
                 .thenReturn(Optional.of(new Workflow("Onboarding", null)));
         when(stepRepository.existsByWorkflow_IdAndPosition(8L, 1)).thenReturn(true);
 
-        ResponseStatusException ex = assertThrows(
-                ResponseStatusException.class,
+        StepChangeException ex = assertThrows(
+                StepChangeException.class,
                 () -> service.create(8L, request(), OWNER));
 
-        assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-        assertThat(ex.getReason()).isEqualTo("A step already exists at this position");
+        assertThat(ex.getStatus()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(ex.getTitle()).isEqualTo("Workflow step position conflict");
+        assertThat(ex.getMessage()).isEqualTo("A step already exists at this position");
         verify(configurationValidator).validate(StepType.VALIDATE_FIELDS, request().configuration());
         verify(stepRepository, never()).save(any());
     }

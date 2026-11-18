@@ -42,7 +42,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 @ImportAutoConfiguration(FlywayAutoConfiguration.class)
 @Import({
         ExecutionAbandonmentService.class,
-        ExecutionCheckpointStore.class
+        ExecutionCheckpointStore.class,
+        ExecutionDefinitionStore.class
 })
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @Testcontainers

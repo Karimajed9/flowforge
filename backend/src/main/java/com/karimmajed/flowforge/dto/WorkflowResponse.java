@@ -8,7 +8,8 @@ public record WorkflowResponse(
     String name,
     String description,
     boolean active,
-    OffsetDateTime createdAt
+    OffsetDateTime createdAt,
+    long stepRevision
 ) {
     public static WorkflowResponse from(Workflow workflow) {
         return new WorkflowResponse(
@@ -16,7 +17,8 @@ public record WorkflowResponse(
             workflow.getName(),
             workflow.getDescription(),
             workflow.isActive(),
-            workflow.getCreatedAt()
+            workflow.getCreatedAt(),
+            workflow.getStepRevision()
         );
     }
 }

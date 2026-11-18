@@ -29,10 +29,15 @@ public class ExecutionCheckpointStore {
 
     private final JdbcTemplate jdbc;
 
+    private final ExecutionDefinitionStore definitions;
+
     private final JsonMapper jsonMapper = JsonMapper.builder().build();
 
-    public ExecutionCheckpointStore(JdbcTemplate jdbc) {
+    public ExecutionCheckpointStore(
+            JdbcTemplate jdbc,
+            ExecutionDefinitionStore definitions) {
         this.jdbc = jdbc;
+        this.definitions = definitions;
     }
 
     public record StepWork(
@@ -110,7 +115,8 @@ public class ExecutionCheckpointStore {
             return Claim.alreadyFinished();
         }
 
-        List<StepRow> steps = loadSteps(execution.workflowId());
+        definitions.freeze(executionId, execution.workflowId());
+        List<StepRow> steps = loadSteps(executionId);
         List<CheckpointRow> checkpoints = loadCheckpoints(executionId);
 
         if (execution.status().equals("RECEIVED")
@@ -171,22 +177,17 @@ public class ExecutionCheckpointStore {
 
         Long remaining = jdbc.queryForObject("""
                 SELECT COUNT(*)
-                FROM workflow_steps s
-                WHERE s.workflow_id = (
-                    SELECT workflow_id
-                    FROM workflow_executions
-                    WHERE id = ?
-                )
+                FROM execution_step_definitions s
+                WHERE s.execution_id = ?
                   AND NOT EXISTS (
                     SELECT 1
                     FROM execution_step_checkpoints c
-                    WHERE c.execution_id = ?
-                      AND c.workflow_step_id = s.id
+                    WHERE c.execution_id = s.execution_id
+                      AND c.workflow_step_id = s.workflow_step_id
                       AND c.status = 'SUCCEEDED'
                   )
                 """,
                 Long.class,
-                work.executionId(),
                 work.executionId());
 
         if (remaining != null && remaining > 0) {
@@ -326,22 +327,22 @@ public class ExecutionCheckpointStore {
                 executionId);
     }
 
-    private List<StepRow> loadSteps(long workflowId) {
+    private List<StepRow> loadSteps(long executionId) {
         return jdbc.query("""
-                SELECT id,
+                SELECT workflow_step_id,
                        name,
                        step_type,
                        configuration::text AS configuration
-                FROM workflow_steps
-                WHERE workflow_id = ?
+                FROM execution_step_definitions
+                WHERE execution_id = ?
                 ORDER BY position ASC
                 """,
                 (rs, rowNum) -> new StepRow(
-                        rs.getLong("id"),
+                        rs.getLong("workflow_step_id"),
                         rs.getString("name"),
                         StepType.valueOf(rs.getString("step_type")),
                         readJson(rs.getString("configuration"))),
-                workflowId);
+                executionId);
     }
 
     private List<CheckpointRow> loadCheckpoints(long executionId) {

@@ -67,7 +67,8 @@ class WorkflowControllerTest {
                 "Onboarding",
                 null,
                 true,
-                OffsetDateTime.parse("2026-11-16T15:00:00Z"));
+                OffsetDateTime.parse("2026-11-16T15:00:00Z"),
+                0L);
         when(service.getPage(eq(0), eq(20), any(ResourceOwner.class)))
                 .thenReturn(new PageImpl<>(
                 List.of(workflow),

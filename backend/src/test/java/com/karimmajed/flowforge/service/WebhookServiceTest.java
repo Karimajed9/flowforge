@@ -45,6 +45,9 @@ class WebhookServiceTest {
     @Mock
     private ExecutionOutboxRepository outboxRepository;
 
+    @Mock
+    private ExecutionDefinitionStore definitions;
+
     @InjectMocks
     private WebhookService service;
 
@@ -102,6 +105,7 @@ class WebhookServiceTest {
                 event.getExecution().getId().equals(21L)
                 && event.getPublishedAt() == null
         ));
+        verify(definitions).freeze(21L, 7L);
     }
 
     @Test
@@ -132,6 +136,7 @@ class WebhookServiceTest {
 
         verify(executionRepository, never()).save(any());
         verify(outboxRepository, never()).save(any());
+        verify(definitions, never()).freeze(anyLong(), anyLong());
     }
 
     @Test
@@ -166,6 +171,7 @@ class WebhookServiceTest {
 
         verify(executionRepository, never()).save(any());
         verify(outboxRepository, never()).save(any());
+        verify(definitions, never()).freeze(anyLong(), anyLong());
     }
 
     @Test
@@ -194,6 +200,7 @@ class WebhookServiceTest {
 
         verifyNoInteractions(executionRepository);
         verifyNoInteractions(outboxRepository);
+        verifyNoInteractions(definitions);
     }
 
     private Workflow makeWorkflow() {

@@ -5,6 +5,7 @@ import { useSession } from '../auth/useSession.ts'
 import { Header } from './Header.tsx'
 import { LoadingState } from './LoadingState.tsx'
 import { Sidebar } from './Sidebar.tsx'
+import { UnsavedChanges } from './unsavedChanges.tsx'
 
 function requiresAccessToken(pathname: string): boolean {
   return (
@@ -30,6 +31,7 @@ export function AppLayout() {
   }
 
   return (
+    <UnsavedChanges>
     <div className="h-svh overflow-hidden bg-navy-950 text-ink lg:grid lg:grid-cols-[16rem_minmax(0,1fr)]">
       <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
       <div
@@ -48,5 +50,6 @@ export function AppLayout() {
         </main>
       </div>
     </div>
+    </UnsavedChanges>
   )
 }

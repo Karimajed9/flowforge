@@ -1,13 +1,11 @@
 import { renderToString } from 'react-dom/server'
-import { MemoryRouter } from 'react-router'
+import { createMemoryRouter, RouterProvider } from 'react-router'
 import { expect, test } from 'vitest'
-import { AppRoutes } from './App.tsx'
+import { appRoutes } from './appRoutes.tsx'
 
 test('overview route renders the dashboard shell', () => {
   const html = renderToString(
-    <MemoryRouter initialEntries={['/']}>
-      <AppRoutes />
-    </MemoryRouter>,
+    <RouterProvider router={createMemoryRouter(appRoutes, { initialEntries: ['/'] })} />,
   )
 
   expect(html).toContain('FLOWFORGE')
@@ -18,9 +16,9 @@ test('overview route renders the dashboard shell', () => {
 
 test('unknown routes render the not found page', () => {
   const html = renderToString(
-    <MemoryRouter initialEntries={['/missing']}>
-      <AppRoutes />
-    </MemoryRouter>,
+    <RouterProvider
+      router={createMemoryRouter(appRoutes, { initialEntries: ['/missing'] })}
+    />,
   )
 
   expect(html).toContain('Page not found')

@@ -32,6 +32,9 @@ public class Workflow {
     @Column(name = "owner_issuer", length = 512)
     private String ownerIssuer;
 
+    @Column(name = "step_revision", nullable = false)
+    private long stepRevision;
+
     protected Workflow() {
     }
 
@@ -86,5 +89,9 @@ public class Workflow {
     public void assignOwner(String subject, String issuer) {
         this.ownerSubject = subject;
         this.ownerIssuer = issuer;
+    }
+
+    public long getStepRevision() {
+        return stepRevision;
     }
 }

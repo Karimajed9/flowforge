@@ -1,5 +1,11 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { ApiError, getExecution, getExecutionSteps, listWorkflowExecutions } from './client.ts'
+import {
+  ApiError,
+  getExecution,
+  getExecutionSteps,
+  listWorkflowExecutions,
+  updateWorkflowStep,
+} from './client.ts'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -158,4 +164,32 @@ test('workflow execution pages request page and size', async () => {
 
   expect(page.content).toEqual([])
   expect(page.number).toBe(1)
+})
+
+test('a step change without a revision is rejected', async () => {
+  vi.stubGlobal('fetch', () =>
+    Promise.resolve(
+      json({
+        step: {
+          id: 3,
+          name: 'Check fields',
+          stepType: 'VALIDATE_FIELDS',
+          position: 1,
+          configuration: { requiredFields: ['email'] },
+        },
+      }),
+    ),
+  )
+
+  await expect(
+    updateWorkflowStep(4, 3, {
+      name: 'Check fields',
+      configuration: { requiredFields: ['email'] },
+      revision: 1,
+    }),
+  ).rejects.toMatchObject({
+    name: 'ApiError',
+    status: 0,
+    message: 'The API returned an unexpected response',
+  })
 })

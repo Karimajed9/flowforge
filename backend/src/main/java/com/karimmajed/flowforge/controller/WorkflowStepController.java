@@ -38,4 +38,30 @@ public class WorkflowStepController {
 
         return service.getAll(workflowId, caller.require());
     }
+
+    @PatchMapping("/{stepId}")
+    public StepChange update(
+            @PathVariable Long workflowId,
+            @PathVariable Long stepId,
+            @Valid @RequestBody UpdateWorkflowStepRequest request) {
+
+        return service.update(workflowId, stepId, request, caller.require());
+    }
+
+    @DeleteMapping("/{stepId}")
+    public StepListChange delete(
+            @PathVariable Long workflowId,
+            @PathVariable Long stepId,
+            @RequestParam long revision) {
+
+        return service.delete(workflowId, stepId, revision, caller.require());
+    }
+
+    @PutMapping("/order")
+    public StepListChange reorder(
+            @PathVariable Long workflowId,
+            @Valid @RequestBody ReorderWorkflowStepsRequest request) {
+
+        return service.reorder(workflowId, request, caller.require());
+    }
 }
