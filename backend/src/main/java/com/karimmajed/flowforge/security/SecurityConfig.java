@@ -13,6 +13,8 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.authentication.InsufficientAuthenticationException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -38,6 +40,8 @@ import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.security.web.access.AccessDeniedHandlerImpl;
 import org.springframework.security.web.authentication.SimpleUrlAuthenticationSuccessHandler;
 import org.springframework.security.web.authentication.logout.LogoutSuccessHandler;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
@@ -147,11 +151,33 @@ public class SecurityConfig {
                 .logout(logout -> logout
                         .logoutUrl("/api/auth/logout")
                         .logoutSuccessHandler(oidcLogout(clients)))
-                .exceptionHandling(errors -> errors.authenticationEntryPoint(
-                        new JsonAuthenticationEntryPoint()))
+                .exceptionHandling(errors -> errors
+                        .authenticationEntryPoint(new JsonAuthenticationEntryPoint())
+                        .accessDeniedHandler(anonymousDeniedAsUnauthorized()))
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable);
         return http.build();
+    }
+
+    /**
+     * CSRF runs before authorization. A missing token on an anonymous POST
+     * would otherwise be 403, which hides that no session was present.
+     * A signed-in session that omits CSRF stays forbidden.
+     */
+    private static AccessDeniedHandler anonymousDeniedAsUnauthorized() {
+        AccessDeniedHandlerImpl forbidden = new AccessDeniedHandlerImpl();
+        JsonAuthenticationEntryPoint unauthorized = new JsonAuthenticationEntryPoint();
+        return (request, response, denied) -> {
+            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+            if (authentication == null || authentication instanceof AnonymousAuthenticationToken) {
+                unauthorized.commence(
+                        request,
+                        response,
+                        new InsufficientAuthenticationException("Authentication is required", denied));
+                return;
+            }
+            forbidden.handle(request, response, denied);
+        };
     }
 
     /**

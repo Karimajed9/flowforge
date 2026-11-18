@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from 'vitest'
 import { clearCsrf } from '../auth/csrf.ts'
 import { noteSignedOut } from '../auth/session.ts'
-import { createWorkflow, getExecution } from './client.ts'
+import { createWorkflow, getExecution, runWorkflow } from './client.ts'
 
 beforeEach(() => {
   vi.unstubAllGlobals()
@@ -69,6 +69,53 @@ test('a state change sends the CSRF header and the session cookie', async () => 
     },
   ])
   expect(new Headers().get('Authorization')).toBeNull()
+})
+
+test('running a workflow sends the idempotency key and no bearer token', async () => {
+  const calls: Array<{
+    url: string
+    key: string | null
+    csrf: string | null
+    authorization: string | null
+    credentials: RequestCredentials | undefined
+    body: string | undefined
+  }> = []
+  vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({
+      url: String(input),
+      key: new Headers(init?.headers).get('Idempotency-Key'),
+      csrf: new Headers(init?.headers).get('X-XSRF-TOKEN'),
+      authorization: new Headers(init?.headers).get('Authorization'),
+      credentials: init?.credentials,
+      body: typeof init?.body === 'string' ? init.body : undefined,
+    })
+    return Promise.resolve(
+      json({
+        id: 21,
+        workflowId: 4,
+        status: 'RECEIVED',
+        createdAt: '2026-11-16T15:04:00Z',
+        failureReason: null,
+        payload: { secret: 'must-not-be-required' },
+        webhookToken: 'must-not-store',
+      }, 201),
+    )
+  })
+
+  const execution = await runWorkflow(4, '{"amount":1}', 'manual-1')
+
+  expect(execution).toMatchObject({ id: 21, status: 'RECEIVED' })
+  expect(calls).toEqual([
+    {
+      url: '/api/workflows/4/executions',
+      key: 'manual-1',
+      csrf: 'test-csrf',
+      authorization: null,
+      credentials: 'include',
+      body: '{"amount":1}',
+    },
+  ])
+  expect(JSON.stringify(execution)).not.toContain('must-not-store')
 })
 
 test('a 401 returns to signed out without treating it as CSRF', async () => {

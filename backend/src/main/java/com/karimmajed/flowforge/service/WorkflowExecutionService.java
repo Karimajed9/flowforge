@@ -1,6 +1,8 @@
 package com.karimmajed.flowforge.service;
 
+import com.karimmajed.flowforge.dto.WebhookTriggerResult;
 import com.karimmajed.flowforge.dto.WorkflowExecutionResponse;
+import com.karimmajed.flowforge.entity.Workflow;
 import com.karimmajed.flowforge.entity.WorkflowExecution;
 import com.karimmajed.flowforge.repository.WorkflowExecutionRepository;
 import com.karimmajed.flowforge.repository.WorkflowRepository;
@@ -14,18 +16,48 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.Map;
+
 @Service
 public class WorkflowExecutionService {
 
     private final WorkflowExecutionRepository executionRepository;
     private final WorkflowRepository workflowRepository;
+    private final WebhookService webhookService;
 
     public WorkflowExecutionService(
             WorkflowExecutionRepository executionRepository,
-            WorkflowRepository workflowRepository) {
+            WorkflowRepository workflowRepository,
+            WebhookService webhookService) {
 
         this.executionRepository = executionRepository;
         this.workflowRepository = workflowRepository;
+        this.webhookService = webhookService;
+    }
+
+    @Transactional
+    public WebhookTriggerResult run(
+            Long workflowId,
+            String clientKey,
+            byte[] body,
+            Map<String, Object> payload,
+            ResourceOwner owner) {
+
+        Workflow workflow = workflowRepository
+                .findByIdAndOwnerSubjectAndOwnerIssuer(
+                        workflowId, owner.subject(), owner.issuer())
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Workflow not found"));
+
+        if (!workflow.isActive()) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Workflow is inactive");
+        }
+
+        String idempotencyKey = IdempotencyKeys.resolve(workflowId, clientKey, body);
+        return webhookService.accept(workflow, idempotencyKey, payload);
     }
 
     @Transactional(readOnly = true)

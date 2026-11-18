@@ -51,6 +51,9 @@ class WorkflowExecutionServiceTest {
     @Mock
     private WorkflowRepository workflowRepository;
 
+    @Mock
+    private WebhookService webhookService;
+
     @InjectMocks
     private WorkflowExecutionService service;
 

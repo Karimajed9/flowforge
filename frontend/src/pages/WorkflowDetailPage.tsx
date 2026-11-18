@@ -9,6 +9,7 @@ import { LoadingState } from '../components/LoadingState.tsx'
 import { MissingResource } from '../components/MissingResource.tsx'
 import { workflowNotFound } from '../components/notFoundCopy.ts'
 import { RequestError } from '../components/RequestError.tsx'
+import { RunWorkflowPanel } from '../components/RunWorkflowPanel.tsx'
 import { StableRegion } from '../components/StableRegion.tsx'
 import { StepConfigurationSummary } from '../components/StepConfigurationSummary.tsx'
 import { WorkflowStatusControl } from '../components/WorkflowStatusControl.tsx'
@@ -92,6 +93,7 @@ function WorkflowDetailContent({
         onUpdated={setWorkflow}
         onRefresh={onRefresh}
       />
+      <RunWorkflowPanel workflowId={workflow.id} active={workflow.active} />
       <StepList steps={steps} />
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold">Add a step</h2>
