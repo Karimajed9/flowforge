@@ -4,13 +4,17 @@ import com.karimmajed.flowforge.controller.AuthController;
 import com.karimmajed.flowforge.controller.ExecutionRecoveryController;
 import com.karimmajed.flowforge.controller.WebhookController;
 import com.karimmajed.flowforge.controller.WorkflowController;
+import com.karimmajed.flowforge.controller.WorkflowExecutionController;
 import com.karimmajed.flowforge.dto.WebhookTriggerResult;
 import com.karimmajed.flowforge.dto.WorkflowExecutionResponse;
 import com.karimmajed.flowforge.dto.WorkflowResponse;
 import com.karimmajed.flowforge.enums.ExecutionStatus;
+import com.karimmajed.flowforge.service.DashboardReadService;
 import com.karimmajed.flowforge.service.ExecutionAbandonmentService;
 import com.karimmajed.flowforge.service.ExecutionRecoveryService;
+import com.karimmajed.flowforge.service.ExecutionStepHistoryService;
 import com.karimmajed.flowforge.service.WebhookService;
+import com.karimmajed.flowforge.service.WorkflowExecutionService;
 import com.karimmajed.flowforge.service.WorkflowOwnership;
 import com.karimmajed.flowforge.service.WorkflowService;
 
@@ -42,6 +46,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
@@ -59,6 +64,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         controllers = {
                 AuthController.class,
                 WorkflowController.class,
+                WorkflowExecutionController.class,
                 WebhookController.class,
                 ExecutionRecoveryController.class
         },
@@ -79,6 +85,15 @@ class BffAuthenticationTest {
 
     @MockitoBean
     private WorkflowService workflows;
+
+    @MockitoBean
+    private WorkflowExecutionService executions;
+
+    @MockitoBean
+    private ExecutionStepHistoryService stepHistory;
+
+    @MockitoBean
+    private DashboardReadService dashboardReads;
 
     @MockitoBean
     private WebhookService webhooks;
@@ -226,6 +241,54 @@ class BffAuthenticationTest {
                 .andExpect(jsonPath("$.id").value(4));
 
         verify(workflows).create(any(), eq(new ResourceOwner("session-user", TestAccess.ISSUER)));
+    }
+
+    @Test
+    void manualRunRequiresASessionAndCsrf() throws Exception {
+        mockMvc.perform(post("/api/workflows/{id}/executions", 4)
+                        .with(TestAccess.clearAuthentication())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/api/workflows/{id}/executions", 4)
+                        .with(sessionUser("session-user", "Ada", SecurityConfig.USER))
+                        .header("Idempotency-Key", "manual-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":1}"))
+                .andExpect(status().isForbidden());
+        verifyNoInteractions(executions);
+
+        when(executions.run(eq(4L), eq("manual-1"), any(byte[].class), anyMap(), any()))
+                .thenReturn(new WebhookTriggerResult(
+                        new WorkflowExecutionResponse(
+                                21L,
+                                4L,
+                                ExecutionStatus.RECEIVED,
+                                OffsetDateTime.parse("2026-11-16T15:04:00Z")),
+                        false));
+        GrantedCsrf csrf = grantedCsrf();
+        MvcResult result = mockMvc.perform(post("/api/workflows/{id}/executions", 4)
+                        .with(sessionUser("session-user", "Ada", SecurityConfig.USER))
+                        .cookie(csrf.cookie())
+                        .header(csrf.headerName(), csrf.token())
+                        .header("Idempotency-Key", "manual-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":1}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(21))
+                .andExpect(jsonPath("$.status").value("RECEIVED"))
+                .andExpect(jsonPath("$.payload").doesNotExist())
+                .andExpect(jsonPath("$.webhookToken").doesNotExist())
+                .andReturn();
+
+        assertNoOAuthTokens(result.getResponse().getContentAsString());
+        verify(executions).run(
+                eq(4L),
+                eq("manual-1"),
+                any(byte[].class),
+                anyMap(),
+                eq(new ResourceOwner("session-user", TestAccess.ISSUER)));
     }
 
     @Test

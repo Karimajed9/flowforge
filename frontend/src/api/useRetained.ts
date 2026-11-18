@@ -1,15 +1,10 @@
-import { useState } from 'react'
 import type { LoadState } from './useLoad.ts'
 
 export function useRetained<T>(state: LoadState<T>) {
-  const ready = state.kind === 'ready' ? state.data : null
-  const [held, setHeld] = useState<T | null>(null)
-  if (ready !== null && held !== ready) {
-    setHeld(ready)
-  }
-  const loading = state.kind === 'loading'
+  const data =
+    state.kind === 'ready' || state.kind === 'loading' ? state.data : null
   return {
-    data: ready ?? (loading ? held : null),
-    loading,
+    data,
+    loading: state.kind === 'loading',
   }
 }

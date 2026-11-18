@@ -8,6 +8,7 @@ import { executionNotFound } from '../components/notFoundCopy.ts'
 import { RequestError } from '../components/RequestError.tsx'
 import { StableRegion } from '../components/StableRegion.tsx'
 import { StatusBadge } from '../components/StatusBadge.tsx'
+import { executionStatusNote } from '../lib/executionStatus.ts'
 import { formatTimestamp, positiveId } from '../lib/format.ts'
 import type { ExecutionStep } from '../types/stepHistory.ts'
 import type { WorkflowExecution } from '../types/execution.ts'
@@ -69,6 +70,7 @@ function ExecutionSummary({
   execution: WorkflowExecution
   onRefresh: () => void
 }) {
+  const statusNote = executionStatusNote(execution.status)
   return (
     <section className="rounded-2xl border border-line bg-navy-900 p-5 sm:p-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -89,6 +91,9 @@ function ExecutionSummary({
           </button>
         </div>
       </div>
+      {statusNote ? (
+        <p className="mt-4 text-sm leading-6 text-muted">{statusNote}</p>
+      ) : null}
       <dl className="mt-6 grid gap-4 text-sm sm:grid-cols-2">
         <div>
           <dt className="text-muted">Execution id</dt>
@@ -125,7 +130,7 @@ function StepHistory({ steps }: { steps: ExecutionStep[] }) {
       <div>
         <h2 className="text-lg font-semibold">Step history</h2>
         <p className="mt-2 text-sm leading-6 text-muted">
-          leaseUntil is informational. A past timestamp does not prove the
+          Lease until is informational. A time in the past does not prove the
           worker has stopped.
         </p>
       </div>

@@ -3,7 +3,7 @@ import { isAbort } from './errors.ts'
 
 export type LoadState<T> =
   | { kind: 'idle' }
-  | { kind: 'loading' }
+  | { kind: 'loading'; data: T | null }
   | { kind: 'ready'; data: T }
   | { kind: 'error'; message: string; status: number | null }
 
@@ -28,12 +28,18 @@ export function useLoad<T>(
   const requestKey = key === null ? null : `${key}#${attempt}`
   const [seenKey, setSeenKey] = useState(requestKey)
   const [state, setState] = useState<LoadState<T>>(
-    requestKey === null ? { kind: 'idle' } : { kind: 'loading' },
+    requestKey === null ? { kind: 'idle' } : { kind: 'loading', data: null },
   )
 
   if (seenKey !== requestKey) {
+    const previous =
+      state.kind === 'ready' || state.kind === 'loading' ? state.data : null
     setSeenKey(requestKey)
-    setState(requestKey === null ? { kind: 'idle' } : { kind: 'loading' })
+    setState(
+      requestKey === null
+        ? { kind: 'idle' }
+        : { kind: 'loading', data: previous },
+    )
   }
 
   useEffect(() => {

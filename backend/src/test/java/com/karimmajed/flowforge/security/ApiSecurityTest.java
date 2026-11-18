@@ -95,6 +95,11 @@ class ApiSecurityTest {
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/executions/{id}", 21).with(TestAccess.clearAuthentication()))
                 .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/workflows/{id}/executions", 4)
+                        .with(TestAccess.clearAuthentication())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isUnauthorized());
 
         verifyNoInteractions(workflows, dashboardReads, executions);
     }
@@ -121,6 +126,24 @@ class ApiSecurityTest {
         mockMvc.perform(get("/api/executions/{id}", 21).with(TestAccess.user()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(21));
+
+        when(executions.run(eq(4L), eq("manual-1"), any(byte[].class), anyMap(), any(ResourceOwner.class)))
+                .thenReturn(new WebhookTriggerResult(
+                        new WorkflowExecutionResponse(
+                                21L,
+                                4L,
+                                ExecutionStatus.RECEIVED,
+                                OffsetDateTime.parse("2026-11-16T15:04:00Z")),
+                        false));
+        mockMvc.perform(post("/api/workflows/{id}/executions", 4)
+                        .with(TestAccess.user())
+                        .header("Idempotency-Key", "manual-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":1}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(21))
+                .andExpect(jsonPath("$.status").value("RECEIVED"))
+                .andExpect(jsonPath("$.payload").doesNotExist());
     }
 
     @Test

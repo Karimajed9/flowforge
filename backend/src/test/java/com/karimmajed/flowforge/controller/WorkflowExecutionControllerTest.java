@@ -2,6 +2,7 @@ package com.karimmajed.flowforge.controller;
 
 import com.karimmajed.flowforge.dto.ExecutionStepResponse;
 import com.karimmajed.flowforge.dto.RecentExecutionResponse;
+import com.karimmajed.flowforge.dto.WebhookTriggerResult;
 import com.karimmajed.flowforge.dto.WorkflowExecutionResponse;
 import com.karimmajed.flowforge.enums.ExecutionStatus;
 import com.karimmajed.flowforge.enums.ExecutionStepStatus;
@@ -17,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.server.ResponseStatusException;
@@ -26,11 +28,14 @@ import java.util.List;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -266,6 +271,83 @@ class WorkflowExecutionControllerTest {
 
         mockMvc.perform(get("/api/executions").param("size", "101"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void runReturnsTheNewExecutionWithoutThePayload() throws Exception {
+        when(service.run(eq(4L), eq("manual-1"), any(byte[].class), anyMap(), any(ResourceOwner.class)))
+                .thenReturn(new WebhookTriggerResult(sample(), false));
+
+        mockMvc.perform(post("/api/workflows/{id}/executions", 4)
+                        .header("Idempotency-Key", "manual-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":1}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(21))
+                .andExpect(jsonPath("$.status").value("RECEIVED"))
+                .andExpect(jsonPath("$.payload").doesNotExist())
+                .andExpect(jsonPath("$.idempotencyKey").doesNotExist())
+                .andExpect(jsonPath("$.webhookToken").doesNotExist());
+
+        verify(service).run(eq(4L), eq("manual-1"), any(byte[].class), anyMap(), any(ResourceOwner.class));
+    }
+
+    @Test
+    void runReplayReturnsOk() throws Exception {
+        when(service.run(eq(4L), isNull(), any(byte[].class), anyMap(), any(ResourceOwner.class)))
+                .thenReturn(new WebhookTriggerResult(sample(), true));
+
+        mockMvc.perform(post("/api/workflows/{id}/executions", 4)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(21))
+                .andExpect(jsonPath("$.status").value("RECEIVED"));
+    }
+
+    @Test
+    void runRejectsMalformedJson() throws Exception {
+        mockMvc.perform(post("/api/workflows/{id}/executions", 4)
+                        .header("Idempotency-Key", "manual-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{invalid"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void runRejectsAJsonArray() throws Exception {
+        mockMvc.perform(post("/api/workflows/{id}/executions", 4)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("[1]"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void runRejectsAnInvalidIdempotencyKey() throws Exception {
+        when(service.run(eq(4L), eq("bad key"), any(byte[].class), anyMap(), any(ResourceOwner.class)))
+                .thenThrow(new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "A valid Idempotency-Key is required"));
+
+        mockMvc.perform(post("/api/workflows/{id}/executions", 4)
+                        .header("Idempotency-Key", "bad key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void runRejectsAPayloadOverTheExistingCap() throws Exception {
+        mockMvc.perform(post("/api/workflows/{id}/executions", 4)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"blob\":\"" + "a".repeat(JsonObjectBody.MAX_PAYLOAD_BYTES) + "\"}"))
+                .andExpect(status().isContentTooLarge());
+
+        verifyNoInteractions(service);
     }
 
     private static WorkflowExecutionResponse sample() {

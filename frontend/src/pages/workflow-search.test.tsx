@@ -107,16 +107,20 @@ test('the workflows address restores search, status, and page', async () => {
 
 test('search text is debounced and resets the page', async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true })
+  let release: ((response: Response) => void) | null = null
   const calls = installFetch((call) => {
     const query = params(call.url).get('q')
     if (query === 'alpha') {
-      return json(page([workflow(4, 'Alpha')]))
+      return new Promise<Response>((resolve) => {
+        release = resolve
+      })
     }
     return json(page([workflow(4, 'Alpha'), workflow(8, 'Beta')]))
   })
 
   renderAt('/workflows?page=2')
   expect(await screen.findByRole('link', { name: 'Alpha' })).toBeTruthy()
+  const results = screen.getByTestId('workflow-results')
   const before = listCalls(calls).length
 
   fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'al' } })
@@ -126,13 +130,27 @@ test('search text is debounced and resets the page', async () => {
 
   await vi.advanceTimersByTimeAsync(1)
   await waitFor(() => {
+    expect(params(listCalls(calls).at(-1)?.url ?? '').get('q')).toBe('alpha')
+  })
+  expect(screen.getByRole('link', { name: 'Alpha' })).toBeTruthy()
+  expect(screen.getByRole('link', { name: 'Beta' })).toBeTruthy()
+  expect(screen.getByTestId('workflow-results')).toBe(results)
+  expect(results.className).toContain('min-h-[max(14rem,calc(100svh-12rem))]')
+  expect(results.querySelector('.py-14')).toBeNull()
+  const listed = listCalls(calls).at(-1)
+  expect(params(listed?.url ?? '').get('page')).toBe('0')
+  expect(params(listed?.url ?? '').get('active')).toBeNull()
+
+  const resolve = release as ((response: Response) => void) | null
+  if (!resolve) {
+    throw new Error('The search did not request a new page')
+  }
+  resolve(json(page([workflow(4, 'Alpha')])))
+  await waitFor(() => {
     expect(screen.queryByRole('link', { name: 'Beta' })).toBeNull()
   })
   expect(screen.getByRole('link', { name: 'Alpha' })).toBeTruthy()
-  const listed = listCalls(calls).at(-1)
-  expect(params(listed?.url ?? '').get('q')).toBe('alpha')
-  expect(params(listed?.url ?? '').get('page')).toBe('0')
-  expect(params(listed?.url ?? '').get('active')).toBeNull()
+  expect(screen.getByTestId('workflow-results')).toBe(results)
 })
 
 test('status filters are sent to the server and clear the page', async () => {
@@ -237,6 +255,58 @@ test('changing status keeps the search bar and results region in place', async (
   expect(listCalls(calls).some((call) => params(call.url).get('active') === 'false')).toBe(
     true,
   )
+})
+
+test('changing pages keeps the current results until the next page arrives', async () => {
+  let release: ((response: Response) => void) | null = null
+  const calls = installFetch((call) => {
+    if (params(call.url).get('page') === '1') {
+      return new Promise<Response>((resolve) => {
+        release = resolve
+      })
+    }
+    return json({
+      content: [workflow(4, 'Alpha', true), workflow(8, 'Beta', true)],
+      totalElements: 2,
+      totalPages: 2,
+      size: 20,
+      number: 0,
+      empty: false,
+    })
+  })
+
+  renderAt('/workflows')
+  expect(await screen.findByRole('link', { name: 'Alpha' })).toBeTruthy()
+  const results = screen.getByTestId('workflow-results')
+
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+  expect(screen.getByRole('link', { name: 'Alpha' })).toBeTruthy()
+  expect(screen.getByRole('link', { name: 'Beta' })).toBeTruthy()
+  expect(screen.getByTestId('workflow-results')).toBe(results)
+  expect(results.className).toContain('min-h-[max(14rem,calc(100svh-12rem))]')
+  expect(results.querySelector('.py-14')).toBeNull()
+  expect(screen.getByTestId('route-location').textContent).toBe('/workflows?page=1')
+
+  const resolve = release as ((response: Response) => void) | null
+  if (!resolve) {
+    throw new Error('The next page did not start a request')
+  }
+  resolve(
+    json({
+      content: [workflow(9, 'Later', true)],
+      totalElements: 2,
+      totalPages: 2,
+      size: 20,
+      number: 1,
+      empty: false,
+    }),
+  )
+
+  expect(await screen.findByRole('link', { name: 'Later' })).toBeTruthy()
+  expect(screen.queryByRole('link', { name: 'Alpha' })).toBeNull()
+  expect(screen.getByTestId('workflow-results')).toBe(results)
+  expect(params(listCalls(calls).at(-1)?.url ?? '').get('page')).toBe('1')
 })
 
 test('pagination keeps the search text and active filter', async () => {

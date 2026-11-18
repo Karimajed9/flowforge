@@ -11,6 +11,7 @@ import com.karimmajed.flowforge.dto.CreateWorkflowStepRequest;
 import com.karimmajed.flowforge.dto.DashboardOverviewResponse;
 import com.karimmajed.flowforge.dto.UpdateWorkflowStatusRequest;
 import com.karimmajed.flowforge.dto.WebhookTokenResponse;
+import com.karimmajed.flowforge.enums.ExecutionStatus;
 import com.karimmajed.flowforge.enums.StepType;
 import com.karimmajed.flowforge.security.CurrentCaller;
 import com.karimmajed.flowforge.security.ResourceOwner;
@@ -42,6 +43,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -625,7 +627,8 @@ class WorkflowOwnershipIntegrationTest {
                 executions,
                 history,
                 reads,
-                new CurrentCaller());
+                new CurrentCaller(),
+                JsonMapper.builder().build());
     }
 
     private static void authenticate(String subject) {
@@ -700,6 +703,70 @@ class WorkflowOwnershipIntegrationTest {
                 tokenHash,
                 owner == null ? null : owner.subject(),
                 owner == null ? null : owner.issuer());
+    }
+
+    @Test
+    void ownerCanRunAnActiveWorkflowWithoutRunningItInline() {
+        var created = workflows.create(new CreateWorkflowRequest("Runnable", null), USER_A);
+        workflows.updateStatus(created.id(), new UpdateWorkflowStatusRequest(true), USER_A);
+        byte[] body = "{\"kind\":\"first\"}".getBytes(StandardCharsets.UTF_8);
+        Map<String, Object> payload = Map.of("kind", "first");
+
+        var createdRun = executions.run(created.id(), "manual-1", body, payload, USER_A);
+        assertThat(createdRun.replayed()).isFalse();
+        assertThat(createdRun.response().status()).isEqualTo(ExecutionStatus.RECEIVED);
+        assertThat(createdRun.response().workflowId()).isEqualTo(created.id());
+
+        Integer waiting = jdbc.queryForObject("""
+                SELECT COUNT(*)
+                FROM execution_outbox o
+                JOIN workflow_executions e ON e.id = o.execution_id
+                WHERE e.id = ?
+                  AND e.status = 'RECEIVED'
+                  AND o.published_at IS NULL
+                """, Integer.class, createdRun.response().id());
+        assertThat(waiting).isEqualTo(1);
+        Integer checkpoints = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM execution_step_checkpoints WHERE execution_id = ?",
+                Integer.class,
+                createdRun.response().id());
+        assertThat(checkpoints).isZero();
+
+        var replay = executions.run(created.id(), "manual-1", body, payload, USER_A);
+        assertThat(replay.replayed()).isTrue();
+        assertThat(replay.response().id()).isEqualTo(createdRun.response().id());
+
+        assertThatThrownBy(() -> executions.run(
+                created.id(),
+                "manual-1",
+                "{\"kind\":\"second\"}".getBytes(StandardCharsets.UTF_8),
+                Map.of("kind", "second"),
+                USER_A))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(ex -> ((ResponseStatusException) ex).getStatusCode())
+                .isEqualTo(HttpStatus.CONFLICT);
+
+        byte[] repeated = "{\"name\":\"Ada\"}".getBytes(StandardCharsets.UTF_8);
+        var omitted = executions.run(created.id(), null, repeated, Map.of("name", "Ada"), USER_A);
+        var omittedAgain = executions.run(created.id(), "  ", repeated, Map.of("name", "Ada"), USER_A);
+        assertThat(omitted.replayed()).isFalse();
+        assertThat(omittedAgain.replayed()).isTrue();
+        assertThat(omittedAgain.response().id()).isEqualTo(omitted.response().id());
+        assertThat(omitted.response().id()).isNotEqualTo(createdRun.response().id());
+
+        assertThatThrownBy(() -> executions.run(created.id(), "other-user", body, payload, USER_B))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(ex -> ((ResponseStatusException) ex).getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+
+        workflows.updateStatus(created.id(), new UpdateWorkflowStatusRequest(false), USER_A);
+        assertThatThrownBy(() -> executions.run(created.id(), "after-inactive", body, payload, USER_A))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> {
+                    ResponseStatusException error = (ResponseStatusException) ex;
+                    assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(error.getReason()).isEqualTo("Workflow is inactive");
+                });
     }
 
     @Test

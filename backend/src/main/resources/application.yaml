@@ -105,4 +105,4 @@ flowforge:
     # Default deny. A host is allowed only when named here exactly.
     # For a local test, set FLOWFORGE_HTTP_GET_ALLOWED_HOSTS in ../.env.
     # There is no allow-all value.
-    allowed-hosts: []
+    allowed-hosts: [httpbin.org]

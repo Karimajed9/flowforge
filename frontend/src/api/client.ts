@@ -57,11 +57,15 @@ function textMessage(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null
 }
 
-function problemMessage(value: unknown, status: number): string {
+function problemMessage(
+  value: unknown,
+  status: number,
+): { message: string; title: string | null } {
   if (!value || typeof value !== 'object') {
-    return `Request failed (${status})`
+    return { message: `Request failed (${status})`, title: null }
   }
   const record = value as {
+    title?: unknown
     detail?: unknown
     message?: unknown
     errors?: unknown
@@ -93,7 +97,10 @@ function problemMessage(value: unknown, status: number): string {
       }
     }
   }
-  return parts.length > 0 ? parts.join(' ') : `Request failed (${status})`
+  return {
+    message: parts.length > 0 ? parts.join(' ') : `Request failed (${status})`,
+    title: textMessage(record.title),
+  }
 }
 
 async function request(
@@ -101,10 +108,12 @@ async function request(
   signal?: AbortSignal,
   method: 'GET' | 'POST' | 'PATCH' = 'GET',
   payload?: unknown,
+  options?: { rawBody?: string; headers?: Record<string, string> },
 ): Promise<unknown> {
   let response: Response
   const headers: Record<string, string> = { Accept: 'application/json' }
-  if (payload !== undefined) {
+  const rawBody = options?.rawBody
+  if (payload !== undefined || rawBody !== undefined) {
     headers['Content-Type'] = 'application/json'
   }
   if (method !== 'GET') {
@@ -113,13 +122,21 @@ async function request(
       throw new DOMException('Aborted', 'AbortError')
     }
   }
+  if (options?.headers) {
+    Object.assign(headers, options.headers)
+  }
 
   try {
     response = await fetch(apiUrl(path), {
       method,
       credentials: 'include',
       headers,
-      body: payload === undefined ? undefined : JSON.stringify(payload),
+      body:
+        rawBody !== undefined
+          ? rawBody
+          : payload === undefined
+            ? undefined
+            : JSON.stringify(payload),
       signal,
     })
   } catch (error) {
@@ -138,12 +155,10 @@ async function request(
   }
 
   if (!response.ok) {
-    throw new ApiError(
-      response.status,
-      body.parsed
-        ? problemMessage(body.value, response.status)
-        : `Request failed (${response.status})`,
-    )
+    const problem = body.parsed
+      ? problemMessage(body.value, response.status)
+      : { message: `Request failed (${response.status})`, title: null }
+    throw new ApiError(response.status, problem.message, problem.title)
   }
 
   if (!body.parsed) {
@@ -245,6 +260,18 @@ export async function loadExecutionDetails(
     getExecutionSteps(id, signal),
   ])
   return { execution, steps }
+}
+
+export function runWorkflow(
+  workflowId: number,
+  jsonText: string,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<WorkflowExecution> {
+  return request(`/api/workflows/${workflowId}/executions`, signal, 'POST', undefined, {
+    rawBody: jsonText,
+    headers: { 'Idempotency-Key': idempotencyKey },
+  }).then(parseExecution)
 }
 
 export function createWorkflow(

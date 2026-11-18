@@ -53,6 +53,15 @@ public class WebhookService {
                 "Webhook not found"
             ));
 
+        return accept(workflow, idempotencyKey, payload);
+    }
+
+    @Transactional
+    public WebhookTriggerResult accept(
+            Workflow workflow,
+            String idempotencyKey,
+            Map<String, Object> payload) {
+
         // Check if this event has already been received.
         var existing = executionRepository
             .findByWorkflow_IdAndIdempotencyKey(
