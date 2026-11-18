@@ -4,14 +4,13 @@ import type { WorkflowDetail } from '../api/client.ts'
 import { useWorkflowDetail } from '../api/hooks.ts'
 import { useRetained } from '../api/useRetained.ts'
 import { CreateStepForms } from '../components/CreateStepForms.tsx'
-import { EmptyState } from '../components/EmptyState.tsx'
+import { EditableStepList } from '../components/EditableStepList.tsx'
 import { LoadingState } from '../components/LoadingState.tsx'
 import { MissingResource } from '../components/MissingResource.tsx'
 import { workflowNotFound } from '../components/notFoundCopy.ts'
 import { RequestError } from '../components/RequestError.tsx'
 import { RunWorkflowPanel } from '../components/RunWorkflowPanel.tsx'
 import { StableRegion } from '../components/StableRegion.tsx'
-import { StepConfigurationSummary } from '../components/StepConfigurationSummary.tsx'
 import { WorkflowStatusControl } from '../components/WorkflowStatusControl.tsx'
 import { formatTimestamp, positiveId } from '../lib/format.ts'
 import type { Workflow, WorkflowStep } from '../types/workflow.ts'
@@ -70,11 +69,13 @@ function WorkflowDetailContent({
   const [seen, setSeen] = useState(detail)
   const [workflow, setWorkflow] = useState(detail.workflow)
   const [steps, setSteps] = useState(detail.steps)
+  const [revision, setRevision] = useState(detail.workflow.stepRevision)
 
   if (seen !== detail) {
     setSeen(detail)
     setWorkflow(detail.workflow)
     setSteps(detail.steps)
+    setRevision(detail.workflow.stepRevision)
   }
 
   function addStep(step: WorkflowStep) {
@@ -83,6 +84,7 @@ function WorkflowDetailContent({
         (left, right) => left.position - right.position || left.id - right.id,
       ),
     )
+    setRevision((current) => current + 1)
   }
 
   return (
@@ -94,12 +96,20 @@ function WorkflowDetailContent({
         onRefresh={onRefresh}
       />
       <RunWorkflowPanel workflowId={workflow.id} active={workflow.active} />
-      <StepList steps={steps} />
+      <EditableStepList
+        workflowId={workflow.id}
+        steps={steps}
+        revision={revision}
+        onChange={(nextSteps, nextRevision) => {
+          setSteps(nextSteps)
+          setRevision(nextRevision)
+        }}
+      />
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold">Add a step</h2>
         <p className="text-sm leading-6 text-muted">
-          Steps can be added. Editing, deleting, and reordering are not
-          available.
+          New steps are used by later runs. A run that already started keeps
+          the steps it began with.
         </p>
         <CreateStepForms workflowId={workflow.id} onCreated={addStep} />
       </section>
@@ -167,32 +177,3 @@ function WorkflowHeader({
   )
 }
 
-function StepList({ steps }: { steps: WorkflowStep[] }) {
-  return (
-    <section className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold">Steps</h2>
-      {steps.length === 0 ? (
-        <EmptyState
-          title="No steps yet"
-          description="This workflow has no steps. Add a field check or an HTTPS GET below."
-        />
-      ) : (
-        <ol className="grid gap-4">
-          {steps.map((step) => (
-            <li
-              key={step.id}
-              className="rounded-2xl border border-line bg-navy-900 p-5"
-            >
-              <p className="text-xs font-semibold tracking-wide text-muted">
-                Position {step.position}
-              </p>
-              <h3 className="mt-1 text-lg font-semibold">{step.name}</h3>
-              <p className="mt-1 text-sm text-muted">{step.stepType}</p>
-              <StepConfigurationSummary step={step} />
-            </li>
-          ))}
-        </ol>
-      )}
-    </section>
-  )
-}

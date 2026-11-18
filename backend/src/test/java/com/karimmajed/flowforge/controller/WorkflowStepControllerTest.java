@@ -1,11 +1,16 @@
 package com.karimmajed.flowforge.controller;
 
 import com.karimmajed.flowforge.dto.CreateWorkflowStepRequest;
+import com.karimmajed.flowforge.dto.ReorderWorkflowStepsRequest;
+import com.karimmajed.flowforge.dto.StepChange;
+import com.karimmajed.flowforge.dto.StepListChange;
 import com.karimmajed.flowforge.dto.WorkflowStepResponse;
 import com.karimmajed.flowforge.enums.StepType;
+import com.karimmajed.flowforge.exception.StepChangeException;
 import com.karimmajed.flowforge.security.ResourceOwner;
 import com.karimmajed.flowforge.service.WorkflowStepService;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,14 +24,18 @@ import org.springframework.web.server.ResponseStatusException;
 import java.util.List;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -160,7 +169,9 @@ class WorkflowStepControllerTest {
         mockMvc.perform(post("/api/workflows/{workflowId}/steps", 4)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Invalid request"))
+                .andExpect(jsonPath("$.detail").value("size must be between 0 and 150"));
 
         verify(service, never()).create(any(), any(), any());
     }
@@ -191,14 +202,17 @@ class WorkflowStepControllerTest {
 
     @Test
     void create_duplicatePosition_isConflict() throws Exception {
-        when(service.create(eq(4L), any(), any(ResourceOwner.class))).thenThrow(new ResponseStatusException(
+        when(service.create(eq(4L), any(), any(ResourceOwner.class))).thenThrow(new StepChangeException(
                 HttpStatus.CONFLICT,
+                "Workflow step position conflict",
                 "A step already exists at this position"));
 
         mockMvc.perform(post("/api/workflows/{workflowId}/steps", 4)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(validBody()))
-                .andExpect(status().isConflict());
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.title").value("Workflow step position conflict"))
+                .andExpect(jsonPath("$.detail").value("A step already exists at this position"));
     }
 
     @Test
@@ -218,6 +232,130 @@ class WorkflowStepControllerTest {
                                 }
                                 """))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void updateConflictExplainsThatTheDefinitionChanged() throws Exception {
+        when(service.update(eq(4L), eq(10L), any(), any(ResourceOwner.class)))
+                .thenThrow(new StepChangeException(
+                        HttpStatus.CONFLICT,
+                        "Step definition conflict",
+                        "This workflow changed. Refresh and try again."));
+
+        mockMvc.perform(patch("/api/workflows/{workflowId}/steps/{stepId}", 4, 10)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "Email",
+                                  "configuration": { "requiredFields": ["email"] },
+                                  "revision": 1
+                                }
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.title").value("Step definition conflict"))
+                .andExpect(jsonPath("$.detail").value(
+                        "This workflow changed. Refresh and try again."));
+    }
+
+    @Test
+    void updateReturnsTheSavedStep() throws Exception {
+        when(service.update(eq(4L), eq(10L), any(), any(ResourceOwner.class)))
+                .thenReturn(new StepChange(
+                        new WorkflowStepResponse(
+                                10L,
+                                "Customer email",
+                                StepType.VALIDATE_FIELDS,
+                                1,
+                                Map.of("requiredFields", List.of("email"))),
+                        2L));
+
+        mockMvc.perform(patch("/api/workflows/{workflowId}/steps/{stepId}", 4, 10)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "Customer email",
+                                  "configuration": { "requiredFields": ["email"] },
+                                  "revision": 1
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.step.name").value("Customer email"))
+                .andExpect(jsonPath("$.stepRevision").value(2));
+    }
+
+    @Test
+    void updateWithoutRevisionNamesTheMissingField() throws Exception {
+        mockMvc.perform(patch("/api/workflows/{workflowId}/steps/{stepId}", 4, 10)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name": "Email",
+                                  "configuration": { "requiredFields": ["email"] }
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Invalid request"))
+                .andExpect(jsonPath("$.detail").value("Revision is required"));
+
+        verify(service, never()).update(any(), any(), any(), any());
+    }
+
+    @Test
+    void deletePassesTheRevisionAndReturnsTheRemainingSteps() throws Exception {
+        when(service.delete(eq(4L), eq(10L), eq(3L), any(ResourceOwner.class)))
+                .thenReturn(new StepListChange(
+                        List.of(new WorkflowStepResponse(
+                                11L,
+                                "Call API",
+                                StepType.HTTP_REQUEST,
+                                1,
+                                Map.of("method", "GET", "url", "https://example.com/hook"))),
+                        4L));
+
+        mockMvc.perform(delete("/api/workflows/{workflowId}/steps/{stepId}", 4, 10)
+                        .param("revision", "3"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.steps[0].id").value(11))
+                .andExpect(jsonPath("$.steps[0].position").value(1))
+                .andExpect(jsonPath("$.stepRevision").value(4));
+
+        verify(service).delete(eq(4L), eq(10L), eq(3L), any(ResourceOwner.class));
+    }
+
+    @Test
+    void reorderPassesTheFullOrderAndReturnsIt() throws Exception {
+        when(service.reorder(eq(4L), any(), any(ResourceOwner.class)))
+                .thenReturn(new StepListChange(
+                        List.of(
+                                new WorkflowStepResponse(
+                                        11L,
+                                        "Call API",
+                                        StepType.HTTP_REQUEST,
+                                        1,
+                                        Map.of("method", "GET", "url", "https://example.com/hook")),
+                                new WorkflowStepResponse(
+                                        10L,
+                                        "Validate email",
+                                        StepType.VALIDATE_FIELDS,
+                                        2,
+                                        Map.of("requiredFields", List.of("email")))),
+                        4L));
+
+        mockMvc.perform(put("/api/workflows/{workflowId}/steps/order", 4)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "stepIds": [11, 10], "revision": 3 }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.steps[0].name").value("Call API"))
+                .andExpect(jsonPath("$.steps[1].position").value(2))
+                .andExpect(jsonPath("$.stepRevision").value(4));
+
+        ArgumentCaptor<ReorderWorkflowStepsRequest> request =
+                ArgumentCaptor.forClass(ReorderWorkflowStepsRequest.class);
+        verify(service).reorder(eq(4L), request.capture(), any(ResourceOwner.class));
+        assertThat(request.getValue().stepIds()).containsExactly(11L, 10L);
+        assertThat(request.getValue().revision()).isEqualTo(3L);
     }
 
     private static String validBody() {

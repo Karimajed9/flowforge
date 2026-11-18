@@ -9,6 +9,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -50,6 +51,30 @@ public class GlobalExceptionHandler {
         return ResponseEntity
             .status(HttpStatus.INTERNAL_SERVER_ERROR)
             .body(problem);
+    }
+
+    @ExceptionHandler(StepChangeException.class)
+    public ResponseEntity<ProblemDetail> handleStepChange(StepChangeException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                ex.getStatus(),
+                ex.getMessage());
+        problem.setTitle(ex.getTitle());
+        return ResponseEntity.status(ex.getStatus()).body(problem);
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ProblemDetail> handleInvalidBody(
+            MethodArgumentNotValidException ex) {
+        String detail = ex.getBindingResult().getFieldErrors().stream()
+                .map(error -> error.getDefaultMessage())
+                .filter(message -> message != null && !message.isBlank())
+                .findFirst()
+                .orElse("The request is invalid");
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_REQUEST,
+                detail);
+        problem.setTitle("Invalid request");
+        return ResponseEntity.badRequest().body(problem);
     }
 
     private ResponseEntity<ProblemDetail> conflict(

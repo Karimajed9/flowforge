@@ -46,7 +46,40 @@ public class ExecutionStepHistoryService {
                     "Execution not found");
         }
 
-        return jdbc.query("""
+        Boolean frozen = jdbc.queryForObject(
+                """
+                SELECT definition_frozen
+                FROM workflow_executions
+                WHERE id = ?
+                """,
+                Boolean.class,
+                executionId);
+
+        String steps = Boolean.TRUE.equals(frozen)
+                ? """
+                SELECT d.workflow_step_id AS step_id,
+                       d.name,
+                       d.step_type,
+                       d.position,
+                       c.status,
+                       c.attempt_number,
+                       c.failure_reason,
+                       c.created_at,
+                       c.updated_at,
+                       c.lease_until
+                FROM workflow_executions e
+                JOIN execution_step_definitions d
+                  ON d.execution_id = e.id
+                LEFT JOIN execution_step_checkpoints c
+                  ON c.execution_id = e.id
+                 AND c.workflow_step_id = d.workflow_step_id
+                JOIN workflows w ON w.id = e.workflow_id
+                WHERE e.id = ?
+                  AND w.owner_subject = ?
+                  AND w.owner_issuer = ?
+                ORDER BY d.position ASC, d.workflow_step_id ASC
+                """
+                : """
                 SELECT s.id AS step_id,
                        s.name,
                        s.step_type,
@@ -68,7 +101,10 @@ public class ExecutionStepHistoryService {
                   AND w.owner_subject = ?
                   AND w.owner_issuer = ?
                 ORDER BY s.position ASC, s.id ASC
-                """,
+                """;
+
+        return jdbc.query(
+                steps,
                 (rs, rowNum) -> mapRow(rs),
                 executionId,
                 owner.subject(),

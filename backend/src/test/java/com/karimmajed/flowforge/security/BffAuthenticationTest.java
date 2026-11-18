@@ -505,7 +505,8 @@ class BffAuthenticationTest {
                 "Owned",
                 null,
                 true,
-                OffsetDateTime.parse("2026-11-16T15:04:00Z"));
+                OffsetDateTime.parse("2026-11-16T15:04:00Z"),
+                0L);
     }
 
     private record GrantedCsrf(

@@ -393,9 +393,97 @@ test('step API validation failures stay on the form', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Add field check' }))
 
   expect(
-    await screen.findByText('A step already exists at this position'),
+    await screen.findByText('A step already uses this position. Choose another one.'),
   ).toBeTruthy()
+  expect(input('field-step-name').value).toBe('Check fields')
+  expect(input('field-step-position').value).toBe('1')
+  expect(textArea('field-step-fields').value).toBe('email')
   expect(screen.getByRole('heading', { name: 'No steps yet' })).toBeTruthy()
+})
+
+test('a position-conflict title uses the same message on the HTTPS form', async () => {
+  installFetch((call) => {
+    if (call.method === 'GET' && call.url === '/api/workflows/4') {
+      return json(workflow())
+    }
+    if (call.method === 'GET') {
+      return json([])
+    }
+    return json({ title: 'Workflow step position conflict' }, 409)
+  })
+
+  renderAt('/workflows/4')
+  expect(await screen.findByRole('heading', { name: 'No steps yet' })).toBeTruthy()
+  fireEvent.change(input('http-step-name'), { target: { value: 'Call API' } })
+  fireEvent.change(input('http-step-position'), { target: { value: '2' } })
+  fireEvent.change(input('http-step-url'), {
+    target: { value: 'https://example.com/hook' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Add HTTPS GET' }))
+
+  expect(
+    await screen.findByText('A step already uses this position. Choose another one.'),
+  ).toBeTruthy()
+  expect(screen.queryByText('Request failed (409)')).toBeNull()
+  expect(input('http-step-name').value).toBe('Call API')
+  expect(input('http-step-position').value).toBe('2')
+  expect(input('http-step-url').value).toBe('https://example.com/hook')
+})
+
+test('a bare conflict is not treated as a duplicate position', async () => {
+  installFetch((call) => {
+    if (call.method === 'GET' && call.url === '/api/workflows/4') {
+      return json(workflow())
+    }
+    if (call.method === 'GET') {
+      return json([])
+    }
+    return json({ timestamp: '2026-11-17T00:00:00Z', status: 409, error: 'Conflict' }, 409)
+  })
+
+  renderAt('/workflows/4')
+  expect(await screen.findByRole('heading', { name: 'No steps yet' })).toBeTruthy()
+  fireEvent.change(input('field-step-name'), { target: { value: 'Check fields' } })
+  fireEvent.change(input('field-step-position'), { target: { value: '1' } })
+  fireEvent.change(textArea('field-step-fields'), { target: { value: 'email' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Add field check' }))
+
+  expect(await screen.findByText('Request failed (409)')).toBeTruthy()
+  expect(screen.queryByText('A step already uses this position. Choose another one.')).toBeNull()
+  expect(input('field-step-name').value).toBe('Check fields')
+  expect(input('field-step-position').value).toBe('1')
+  expect(textArea('field-step-fields').value).toBe('email')
+})
+
+test('a stale revision conflict keeps its own message on the add form', async () => {
+  installFetch((call) => {
+    if (call.method === 'GET' && call.url === '/api/workflows/4') {
+      return json(workflow())
+    }
+    if (call.method === 'GET') {
+      return json([])
+    }
+    return json(
+      {
+        title: 'Step definition conflict',
+        detail: 'This workflow changed. Refresh and try again.',
+      },
+      409,
+    )
+  })
+
+  renderAt('/workflows/4')
+  expect(await screen.findByRole('heading', { name: 'No steps yet' })).toBeTruthy()
+  fireEvent.change(input('field-step-name'), { target: { value: 'Check fields' } })
+  fireEvent.change(input('field-step-position'), { target: { value: '1' } })
+  fireEvent.change(textArea('field-step-fields'), { target: { value: 'email' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Add field check' }))
+
+  expect(
+    await screen.findByText('This workflow changed. Refresh and try again.'),
+  ).toBeTruthy()
+  expect(screen.queryByText('A step already uses this position. Choose another one.')).toBeNull()
+  expect(input('field-step-name').value).toBe('Check fields')
 })
 
 test('status updates follow the backend response', async () => {

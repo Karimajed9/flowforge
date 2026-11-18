@@ -13,6 +13,22 @@ import type { WorkflowStep } from '../types/workflow.ts'
 const fieldClass =
   'w-full rounded-lg border border-line bg-navy-800 px-3 py-2 text-sm text-ink'
 
+const POSITION_TAKEN = 'A step already uses this position. Choose another one.'
+
+function addStepError(caught: unknown): string {
+  if (!(caught instanceof ApiError)) {
+    return 'The step was not added'
+  }
+  if (
+    caught.status === 409 &&
+    (caught.title === 'Workflow step position conflict' ||
+      caught.message === 'A step already exists at this position')
+  ) {
+    return POSITION_TAKEN
+  }
+  return caught.message
+}
+
 export function CreateStepForms({
   workflowId,
   onCreated,
@@ -73,9 +89,7 @@ function ValidateFieldsForm({
       setPosition('')
       setFields('')
     } catch (caught) {
-      setError(
-        caught instanceof ApiError ? caught.message : 'The step was not added',
-      )
+      setError(addStepError(caught))
     } finally {
       setPending(false)
     }
@@ -182,9 +196,7 @@ function HttpGetForm({
       setPosition('')
       setUrl('')
     } catch (caught) {
-      setError(
-        caught instanceof ApiError ? caught.message : 'The step was not added',
-      )
+      setError(addStepError(caught))
     } finally {
       setPending(false)
     }

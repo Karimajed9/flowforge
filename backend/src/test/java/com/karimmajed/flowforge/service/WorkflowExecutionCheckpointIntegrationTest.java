@@ -63,6 +63,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 @ImportAutoConfiguration(FlywayAutoConfiguration.class)
 @Import({
         ExecutionCheckpointStore.class,
+        ExecutionDefinitionStore.class,
         WorkflowExecutionProcessor.class,
         HttpsGetExecutor.class,
         OutboxDeliveryStore.class,

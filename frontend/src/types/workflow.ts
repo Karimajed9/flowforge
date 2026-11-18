@@ -4,6 +4,7 @@ export interface Workflow {
   description: string | null
   active: boolean
   createdAt: string
+  stepRevision: number
 }
 
 export interface WorkflowStep {

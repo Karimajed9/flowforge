@@ -69,6 +69,10 @@ public class WorkflowStep {
         return configuration;
     }
 
+    public void setName(String name) {
+        this.name = name;
+    }
+
     public void setConfiguration(Map<String, Object> configuration) {
         this.configuration = configuration;
     }

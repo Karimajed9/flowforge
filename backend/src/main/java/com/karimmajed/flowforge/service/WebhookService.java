@@ -23,17 +23,20 @@ public class WebhookService {
     private final WorkflowExecutionRepository executionRepository;
     private final WebhookTokenService tokenService;
     private final ExecutionOutboxRepository outboxRepository;
+    private final ExecutionDefinitionStore definitions;
 
     public WebhookService(
             WorkflowRepository workflowRepository,
             WorkflowExecutionRepository executionRepository,
             WebhookTokenService tokenService,
-            ExecutionOutboxRepository outboxRepository) {
+            ExecutionOutboxRepository outboxRepository,
+            ExecutionDefinitionStore definitions) {
 
         this.workflowRepository = workflowRepository;
         this.executionRepository = executionRepository;
         this.tokenService = tokenService;
         this.outboxRepository = outboxRepository;
+        this.definitions = definitions;
     }
 
     @Transactional
@@ -99,7 +102,9 @@ public class WebhookService {
     
         WorkflowExecution saved =
             executionRepository.save(execution);
-        
+
+        definitions.freeze(saved.getId(), workflow.getId());
+
         // New: create an outbox event in the same transaction.
         outboxRepository.save(
             new ExecutionOutboxEvent(saved)

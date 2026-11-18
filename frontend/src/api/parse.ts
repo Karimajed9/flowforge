@@ -76,7 +76,18 @@ export function parseWorkflow(value: unknown): Workflow {
     description: nullableString(value, 'description'),
     active: value.active,
     createdAt: requiredString(value, 'createdAt'),
+    stepRevision: revisionNumber(value.stepRevision),
   }
+}
+
+function revisionNumber(value: unknown): number {
+  if (value == null) {
+    return 0
+  }
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    unexpected()
+  }
+  return value
 }
 
 export function parseWorkflowStep(value: unknown): WorkflowStep {

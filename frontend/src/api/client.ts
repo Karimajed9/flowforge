@@ -106,7 +106,7 @@ function problemMessage(
 async function request(
   path: string,
   signal?: AbortSignal,
-  method: 'GET' | 'POST' | 'PATCH' = 'GET',
+  method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE' = 'GET',
   payload?: unknown,
   options?: { rawBody?: string; headers?: Record<string, string> },
 ): Promise<unknown> {
@@ -289,6 +289,82 @@ export function updateWorkflowStatus(
   return request(`/api/workflows/${id}/status`, signal, 'PATCH', { active }).then(
     parseWorkflow,
   )
+}
+
+export function updateWorkflowStep(
+  workflowId: number,
+  stepId: number,
+  input: {
+    name: string
+    configuration: Record<string, unknown>
+    revision: number
+  },
+  signal?: AbortSignal,
+): Promise<{ step: WorkflowStep; stepRevision: number }> {
+  return request(
+    `/api/workflows/${workflowId}/steps/${stepId}`,
+    signal,
+    'PATCH',
+    input,
+  ).then(parseStepChange)
+}
+
+export function deleteWorkflowStep(
+  workflowId: number,
+  stepId: number,
+  revision: number,
+  signal?: AbortSignal,
+): Promise<{ steps: WorkflowStep[]; stepRevision: number }> {
+  return request(
+    `/api/workflows/${workflowId}/steps/${stepId}?revision=${revision}`,
+    signal,
+    'DELETE',
+  ).then(parseStepListChange)
+}
+
+export function reorderWorkflowSteps(
+  workflowId: number,
+  input: { stepIds: number[]; revision: number },
+  signal?: AbortSignal,
+): Promise<{ steps: WorkflowStep[]; stepRevision: number }> {
+  return request(
+    `/api/workflows/${workflowId}/steps/order`,
+    signal,
+    'PUT',
+    input,
+  ).then(parseStepListChange)
+}
+
+function parseStepChange(value: unknown): { step: WorkflowStep; stepRevision: number } {
+  if (!value || typeof value !== 'object') {
+    throw new ApiError(0, 'The API returned an unexpected response')
+  }
+  const record = value as { step?: unknown; stepRevision?: unknown }
+  return {
+    step: parseWorkflowStep(record.step),
+    stepRevision: requiredRevision(record.stepRevision),
+  }
+}
+
+function parseStepListChange(value: unknown): {
+  steps: WorkflowStep[]
+  stepRevision: number
+} {
+  if (!value || typeof value !== 'object') {
+    throw new ApiError(0, 'The API returned an unexpected response')
+  }
+  const record = value as { steps?: unknown; stepRevision?: unknown }
+  return {
+    steps: parseWorkflowSteps(record.steps),
+    stepRevision: requiredRevision(record.stepRevision),
+  }
+}
+
+function requiredRevision(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new ApiError(0, 'The API returned an unexpected response')
+  }
+  return value
 }
 
 export function createWorkflowStep(
