@@ -85,8 +85,8 @@ export function runFailure(error: ApiError, workflowActive = true): RunNotice {
     return { message: invalidRootMessage, retry: false }
   }
   if (
-    (error.status === 413 || error.status === 400) &&
-    error.message === tooLargeDetail
+    error.status === 413 ||
+    (error.status === 400 && error.message === tooLargeDetail)
   ) {
     return { message: 'The payload is too large.', retry: false }
   }

@@ -440,6 +440,42 @@ test('a server failure stays friendly and offers retry', async () => {
   expect(await screen.findByRole('heading', { name: 'Execution 25' })).toBeTruthy()
 })
 
+test('a detail-less size limit keeps the editor text', async () => {
+  vi.stubGlobal('fetch', (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url === '/api/workflows/4/executions') {
+      return Promise.resolve(
+        json(
+          {
+            timestamp: '2026-11-17T20:10:00.000+00:00',
+            status: 413,
+            error: 'Content Too Large',
+            path: '/api/workflows/4/executions',
+          },
+          413,
+        ),
+      )
+    }
+    if (url === '/api/workflows/4') {
+      return Promise.resolve(json(workflow()))
+    }
+    return Promise.resolve(json([]))
+  })
+
+  renderAt('/workflows/4')
+  expect(await screen.findByRole('heading', { name: 'Onboarding' })).toBeTruthy()
+  openRun('{"email":"karim@gmail.com"}')
+
+  expect(await screen.findByRole('alert')).toHaveProperty(
+    'textContent',
+    'The payload is too large.',
+  )
+  expect(screen.queryByText('Content Too Large')).toBeNull()
+  expect(screen.queryByText('The workflow could not be started.')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+  expect(screen.getByLabelText('Payload')).toHaveProperty('value', '{"email":"karim@gmail.com"}')
+})
+
 test('a missing workflow uses the friendly not-found message', async () => {
   vi.stubGlobal('fetch', (input: RequestInfo | URL) => {
     const url = String(input)

@@ -178,6 +178,11 @@ test('step history is shown in position order', async () => {
   expect(names).toEqual(['Check fields', 'Call API'])
   expect(screen.getByText('VALIDATE_FIELDS')).toBeTruthy()
   expect(screen.getByText('HTTP_REQUEST')).toBeTruthy()
+  expect(document.body.textContent?.replace(/\s+/g, ' ')).toContain(
+    'Lease until is informational. A time in the past does not prove the worker has stopped.',
+  )
+  expect(document.body.textContent).not.toContain('leaseUntil is informational')
+  expect(document.body.textContent).not.toContain('past timestamp')
 })
 
 test('NOT_STARTED steps show null attempt and timestamps', async () => {
