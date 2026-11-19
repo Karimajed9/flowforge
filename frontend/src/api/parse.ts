@@ -14,9 +14,10 @@ const STEP_STATUSES = [
   'RUNNING',
   'SUCCEEDED',
   'FAILED',
+  'SKIPPED',
 ] as const satisfies readonly StepHistoryStatus[]
 
-const STEP_TYPES = ['VALIDATE_FIELDS', 'HTTP_REQUEST'] as const
+const STEP_TYPES = ['VALIDATE_FIELDS', 'HTTP_REQUEST', 'CONDITION'] as const
 
 function unexpected(): never {
   throw new ApiError(0, 'The API returned an unexpected response')
@@ -40,6 +41,19 @@ function requiredString(record: Record<string, unknown>, key: string): string {
     unexpected()
   }
   return value
+}
+
+function optionalBoolean(
+  record: Record<string, unknown>,
+  key: string,
+): boolean | null {
+  if (!Object.hasOwn(record, key) || record[key] == null) {
+    return null
+  }
+  if (typeof record[key] !== 'boolean') {
+    unexpected()
+  }
+  return record[key]
 }
 
 function nullableString(
@@ -138,6 +152,7 @@ export function parseStep(value: unknown): ExecutionStep {
     startedAt: nullableString(value, 'startedAt'),
     updatedAt: nullableString(value, 'updatedAt'),
     leaseUntil: nullableString(value, 'leaseUntil'),
+    branchTaken: optionalBoolean(value, 'branchTaken'),
   }
 }
 

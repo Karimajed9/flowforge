@@ -66,7 +66,8 @@ public class ExecutionStepHistoryService {
                        c.failure_reason,
                        c.created_at,
                        c.updated_at,
-                       c.lease_until
+                       c.lease_until,
+                       c.branch_taken
                 FROM workflow_executions e
                 JOIN execution_step_definitions d
                   ON d.execution_id = e.id
@@ -89,7 +90,8 @@ public class ExecutionStepHistoryService {
                        c.failure_reason,
                        c.created_at,
                        c.updated_at,
-                       c.lease_until
+                       c.lease_until,
+                       c.branch_taken
                 FROM workflow_executions e
                 JOIN workflow_steps s
                   ON s.workflow_id = e.workflow_id
@@ -125,6 +127,7 @@ public class ExecutionStepHistoryService {
                     null,
                     null,
                     null,
+                    null,
                     null);
         }
 
@@ -138,6 +141,17 @@ public class ExecutionStepHistoryService {
                 rs.getString("failure_reason"),
                 rs.getObject("created_at", OffsetDateTime.class),
                 rs.getObject("updated_at", OffsetDateTime.class),
-                rs.getObject("lease_until", OffsetDateTime.class));
+                rs.getObject("lease_until", OffsetDateTime.class),
+                booleanOrNull(rs.getObject("branch_taken")));
+    }
+
+    private static Boolean booleanOrNull(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Boolean taken) {
+            return taken;
+        }
+        return Boolean.valueOf(value.toString());
     }
 }

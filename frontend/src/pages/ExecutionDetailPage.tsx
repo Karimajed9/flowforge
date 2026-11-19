@@ -115,7 +115,7 @@ function ExecutionSummary({
         ) : null}
       </dl>
       <Link
-        to={`/executions?workflowId=${execution.workflowId}`}
+        to={`/workflows/${execution.workflowId}`}
         className="mt-6 inline-block text-sm font-medium text-teal-300 hover:text-teal-400"
       >
         Back to this workflow
@@ -174,6 +174,15 @@ function StepHistory({ steps }: { steps: ExecutionStep[] }) {
                   <dd className="mt-1">{formatTimestamp(step.leaseUntil)}</dd>
                 </div>
               </dl>
+              {step.stepType === 'CONDITION' && step.branchTaken === true ? (
+                <p className="mt-4 text-sm text-ink">Took the true branch</p>
+              ) : null}
+              {step.stepType === 'CONDITION' && step.branchTaken === false ? (
+                <p className="mt-4 text-sm text-ink">Took the false branch</p>
+              ) : null}
+              {step.status === 'SKIPPED' ? (
+                <p className="mt-4 text-sm text-muted">This step was skipped.</p>
+              ) : null}
               {step.failureReason ? (
                 <p className="mt-4 text-sm leading-6 text-red-100">
                   <span className="text-muted">Failure reason: </span>

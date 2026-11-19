@@ -167,6 +167,7 @@ class WorkflowExecutionControllerTest {
                         null,
                         OffsetDateTime.parse("2026-11-15T18:00:00Z"),
                         OffsetDateTime.parse("2026-11-15T18:00:01Z"),
+                        null,
                         null),
                 new ExecutionStepResponse(
                         8L,
@@ -178,6 +179,7 @@ class WorkflowExecutionControllerTest {
                         "HTTP status 404",
                         OffsetDateTime.parse("2026-11-15T18:00:01Z"),
                         OffsetDateTime.parse("2026-11-15T18:00:02Z"),
+                        null,
                         null),
                 new ExecutionStepResponse(
                         9L,
@@ -185,6 +187,7 @@ class WorkflowExecutionControllerTest {
                         StepType.VALIDATE_FIELDS,
                         3,
                         ExecutionStepStatus.NOT_STARTED,
+                        null,
                         null,
                         null,
                         null,

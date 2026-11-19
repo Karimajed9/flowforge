@@ -6,9 +6,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -46,6 +48,9 @@ public class StepConfigurationValidator {
 
             case HTTP_REQUEST ->
                 validateHttpRequest(configuration);
+
+            case CONDITION ->
+                validateCondition(configuration);
         }
     }
 
@@ -116,6 +121,122 @@ public class StepConfigurationValidator {
 
         // Additional defense: check DNS resolution.
         validateResolvedAddresses(uri.getHost());
+    }
+
+    private void validateCondition(Map<String, Object> config) {
+        Object operator = config.get("operator");
+        if (!(operator instanceof String name)
+                || !Set.of(
+                        "EQUALS",
+                        "NOT_EQUALS",
+                        "GREATER_THAN",
+                        "LESS_THAN",
+                        "EXISTS").contains(name)) {
+            throw badRequest("Condition operator is invalid");
+        }
+
+        boolean exists = "EXISTS".equals(name);
+        if (exists && config.containsKey("value")) {
+            throw badRequest("EXISTS does not take a value");
+        }
+        if (!exists && !config.containsKey("value")) {
+            throw badRequest("Condition value is required");
+        }
+        Set<String> expected = exists
+                ? Set.of("field", "operator", "trueSteps", "falseSteps")
+                : Set.of("field", "operator", "value", "trueSteps", "falseSteps");
+        if (!config.keySet().equals(expected)) {
+            throw badRequest("CONDITION does not allow extra fields");
+        }
+
+        if (!isTopLevelField(config.get("field"))) {
+            throw badRequest("Condition field must be a top-level name");
+        }
+
+        if (!exists) {
+            validateComparisonValue(name, config.get("value"));
+        }
+
+        List<Long> trueSteps = branchIds(config.get("trueSteps"));
+        List<Long> falseSteps = branchIds(config.get("falseSteps"));
+        if (trueSteps.isEmpty() && falseSteps.isEmpty()) {
+            throw badRequest("A condition needs at least one branch step");
+        }
+        Set<Long> seen = new HashSet<>();
+        for (Long id : trueSteps) {
+            if (!seen.add(id)) {
+                throw badRequest("A branch lists the same step twice");
+            }
+        }
+        for (Long id : falseSteps) {
+            if (!seen.add(id)) {
+                throw badRequest("A branch lists the same step twice");
+            }
+        }
+    }
+
+    private void validateComparisonValue(String operator, Object value) {
+        if ("GREATER_THAN".equals(operator) || "LESS_THAN".equals(operator)) {
+            if (!isFiniteNumber(value)) {
+                throw badRequest("Condition value must be a number");
+            }
+            return;
+        }
+        if (value == null
+                || value instanceof String
+                || value instanceof Boolean
+                || isFiniteNumber(value)) {
+            return;
+        }
+        throw badRequest("Condition value must be a string, number, boolean, or null");
+    }
+
+    private static boolean isFiniteNumber(Object value) {
+        if (value instanceof BigDecimal) {
+            return true;
+        }
+        if (value instanceof Byte || value instanceof Short
+                || value instanceof Integer || value instanceof Long) {
+            return true;
+        }
+        if (value instanceof Float || value instanceof Double) {
+            return Double.isFinite(((Number) value).doubleValue());
+        }
+        return false;
+    }
+
+    private List<Long> branchIds(Object value) {
+        if (!(value instanceof List<?> list)) {
+            throw badRequest("Branch steps must be arrays");
+        }
+        List<Long> ids = new java.util.ArrayList<>();
+        for (Object item : list) {
+            if (!(item instanceof Integer || item instanceof Long)) {
+                throw badRequest("Branch steps must be positive integers");
+            }
+            long id = ((Number) item).longValue();
+            if (id <= 0) {
+                throw badRequest("Branch steps must be positive integers");
+            }
+            ids.add(id);
+        }
+        return ids;
+    }
+
+    private static boolean isTopLevelField(Object value) {
+        if (!(value instanceof String name) || name.isEmpty()) {
+            return false;
+        }
+        for (int index = 0; index < name.length(); index++) {
+            char character = name.charAt(index);
+            if (Character.isWhitespace(character)
+                    || character == '.'
+                    || character == '['
+                    || character == ']') {
+                return false;
+            }
+        }
+        return true;
     }
 
     private void validateHostname(String host) {

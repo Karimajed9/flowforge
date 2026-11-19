@@ -4,5 +4,6 @@ public enum ExecutionStepStatus {
     NOT_STARTED,
     RUNNING,
     SUCCEEDED,
-    FAILED
+    FAILED,
+    SKIPPED
 }
