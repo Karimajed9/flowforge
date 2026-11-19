@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { ApiError } from '../api/errors.ts'
 import { createWorkflowStep } from '../api/client.ts'
+import { insertionBreaksBranch } from '../lib/condition.ts'
 import { isPositionConflict, POSITION_TAKEN, usableReason } from './editorFeedback.ts'
 import { useReportDirty } from './unsavedNavigation.ts'
 import {
@@ -11,6 +12,7 @@ import {
   parseRequiredFieldNames,
 } from '../lib/workflowForm.ts'
 import type { WorkflowStep } from '../types/workflow.ts'
+import { CreateConditionForm } from './CreateConditionForm.tsx'
 
 const fieldClass =
   'w-full rounded-lg border border-line bg-navy-800 px-3 py-2 text-sm text-ink'
@@ -31,24 +33,36 @@ function addStepError(caught: unknown): string {
 
 export function CreateStepForms({
   workflowId,
+  steps,
+  revision,
   onCreated,
 }: {
   workflowId: number
+  steps: WorkflowStep[]
+  revision: number
   onCreated: (step: WorkflowStep) => void
 }) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <ValidateFieldsForm workflowId={workflowId} onCreated={onCreated} />
-      <HttpGetForm workflowId={workflowId} onCreated={onCreated} />
+      <ValidateFieldsForm workflowId={workflowId} steps={steps} onCreated={onCreated} />
+      <HttpGetForm workflowId={workflowId} steps={steps} onCreated={onCreated} />
+      <CreateConditionForm
+        workflowId={workflowId}
+        steps={steps}
+        revision={revision}
+        onCreated={onCreated}
+      />
     </div>
   )
 }
 
 function ValidateFieldsForm({
   workflowId,
+  steps,
   onCreated,
 }: {
   workflowId: number
+  steps: WorkflowStep[]
   onCreated: (step: WorkflowStep) => void
 }) {
   const [name, setName] = useState('')
@@ -73,6 +87,11 @@ function ValidateFieldsForm({
     const parsedFields = parseRequiredFieldNames(fields)
     if (!parsedFields.ok) {
       setError(parsedFields.message)
+      return
+    }
+    const blocked = insertionBreaksBranch(steps, parsedPosition.position)
+    if (blocked) {
+      setError(blocked)
       return
     }
 
@@ -154,9 +173,11 @@ function ValidateFieldsForm({
 
 function HttpGetForm({
   workflowId,
+  steps,
   onCreated,
 }: {
   workflowId: number
+  steps: WorkflowStep[]
   onCreated: (step: WorkflowStep) => void
 }) {
   const [name, setName] = useState('')
@@ -181,6 +202,11 @@ function HttpGetForm({
     const configuration = buildHttpRequestConfiguration('GET', url)
     if (!configuration.ok) {
       setError(configuration.message)
+      return
+    }
+    const blocked = insertionBreaksBranch(steps, parsedPosition.position)
+    if (blocked) {
+      setError(blocked)
       return
     }
 

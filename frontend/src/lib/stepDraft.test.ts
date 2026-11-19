@@ -18,6 +18,20 @@ const request: WorkflowStep = {
   configuration: { url: 'https://example.com/hook', method: 'GET' },
 }
 
+const condition: WorkflowStep = {
+  id: 10,
+  name: 'Amount is 10',
+  stepType: 'CONDITION',
+  position: 1,
+  configuration: {
+    field: 'amount',
+    operator: 'EQUALS',
+    value: 10,
+    trueSteps: [12],
+    falseSteps: [13],
+  },
+}
+
 test('names, types, and parsed configuration use the saved baseline', () => {
   expect(
     stepDraftDiffers(validation, {
@@ -51,6 +65,27 @@ test('names, types, and parsed configuration use the saved baseline', () => {
     stepDraftDiffers(validation, {
       name: 'Check fields',
       stepType: 'VALIDATE_FIELDS',
+      configurationText: '{',
+    }),
+  ).toBe(true)
+  expect(
+    stepDraftDiffers(condition, {
+      name: 'Amount is 10',
+      stepType: 'CONDITION',
+      configurationText: JSON.stringify(condition.configuration),
+    }),
+  ).toBe(false)
+  expect(
+    stepDraftDiffers(condition, {
+      name: 'Amount is 10',
+      stepType: 'CONDITION',
+      configurationText: JSON.stringify({ ...condition.configuration, value: '10' }),
+    }),
+  ).toBe(true)
+  expect(
+    stepDraftDiffers(condition, {
+      name: 'Amount is 10',
+      stepType: 'CONDITION',
       configurationText: '{',
     }),
   ).toBe(true)

@@ -2,5 +2,6 @@ package com.karimmajed.flowforge.enums;
 
 public enum StepType {
     VALIDATE_FIELDS,
-    HTTP_REQUEST
+    HTTP_REQUEST,
+    CONDITION
 }

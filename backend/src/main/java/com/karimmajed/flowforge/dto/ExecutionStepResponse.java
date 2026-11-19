@@ -19,5 +19,6 @@ public record ExecutionStepResponse(
         String failureReason,
         OffsetDateTime startedAt,
         OffsetDateTime updatedAt,
-        OffsetDateTime leaseUntil
+        OffsetDateTime leaseUntil,
+        Boolean branchTaken
 ) {}

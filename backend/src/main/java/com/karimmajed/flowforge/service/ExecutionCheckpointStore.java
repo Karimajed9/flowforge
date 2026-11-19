@@ -148,7 +148,7 @@ public class ExecutionCheckpointStore {
         List<StepRow> remaining = steps.stream()
                 .filter(step -> checkpoints.stream().noneMatch(checkpoint ->
                         checkpoint.stepId() == step.id()
-                                && checkpoint.status().equals("SUCCEEDED")))
+                                && finished(checkpoint.status())))
                 .toList();
 
         if (remaining.isEmpty()) {
@@ -175,6 +175,70 @@ public class ExecutionCheckpointStore {
             return Completion.NOT_OWNER;
         }
 
+        return finishIfDone(work.executionId());
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public Completion completeCondition(StepWork work, boolean branchTaken, List<Long> skippedStepIds) {
+        int updated = jdbc.update("""
+                UPDATE execution_step_checkpoints
+                SET status = 'SUCCEEDED',
+                    branch_taken = ?,
+                    failure_reason = NULL,
+                    lease_until = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE execution_id = ?
+                  AND workflow_step_id = ?
+                  AND attempt_token = ?
+                  AND attempt_number = ?
+                  AND status = 'RUNNING'
+                  AND lease_until > CURRENT_TIMESTAMP
+                """,
+                branchTaken,
+                work.executionId(),
+                work.stepId(),
+                work.attemptToken(),
+                work.attemptNumber());
+
+        if (updated != 1) {
+            return Completion.NOT_OWNER;
+        }
+
+        String token = UUID.randomUUID().toString();
+        for (Long stepId : skippedStepIds) {
+            int inserted = jdbc.update("""
+                    INSERT INTO execution_step_checkpoints (
+                        execution_id,
+                        workflow_step_id,
+                        status,
+                        attempt_token,
+                        attempt_number
+                    )
+                    SELECT d.execution_id, d.workflow_step_id, 'SKIPPED', ?, 1
+                    FROM execution_step_definitions d
+                    WHERE d.execution_id = ?
+                      AND d.workflow_step_id = ?
+                      AND NOT EXISTS (
+                        SELECT 1
+                        FROM execution_step_checkpoints c
+                        WHERE c.execution_id = d.execution_id
+                          AND c.workflow_step_id = d.workflow_step_id
+                      )
+                    """,
+                    token,
+                    work.executionId(),
+                    stepId);
+            if (inserted != 1) {
+                throw new IllegalStateException(
+                        "Could not skip step " + stepId
+                                + " for execution " + work.executionId());
+            }
+        }
+
+        return finishIfDone(work.executionId());
+    }
+
+    private Completion finishIfDone(long executionId) {
         Long remaining = jdbc.queryForObject("""
                 SELECT COUNT(*)
                 FROM execution_step_definitions s
@@ -184,22 +248,22 @@ public class ExecutionCheckpointStore {
                     FROM execution_step_checkpoints c
                     WHERE c.execution_id = s.execution_id
                       AND c.workflow_step_id = s.workflow_step_id
-                      AND c.status = 'SUCCEEDED'
+                      AND c.status IN ('SUCCEEDED', 'SKIPPED')
                   )
                 """,
                 Long.class,
-                work.executionId());
+                executionId);
 
         if (remaining != null && remaining > 0) {
             return Completion.CONTINUE;
         }
 
-        int updated = markSucceeded(work.executionId());
+        int updated = markSucceeded(executionId);
 
         if (updated != 1) {
             throw new IllegalStateException(
                     "Execution status changed while completing "
-                            + work.executionId());
+                            + executionId);
         }
 
         return Completion.FINISHED;
@@ -222,6 +286,10 @@ public class ExecutionCheckpointStore {
         }
 
         return true;
+    }
+
+    private static boolean finished(String status) {
+        return "SUCCEEDED".equals(status) || "SKIPPED".equals(status);
     }
 
     private Claim startStep(

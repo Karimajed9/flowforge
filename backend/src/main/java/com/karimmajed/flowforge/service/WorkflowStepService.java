@@ -2,6 +2,7 @@ package com.karimmajed.flowforge.service;
 
 import com.karimmajed.flowforge.dto.*;
 import com.karimmajed.flowforge.entity.*;
+import com.karimmajed.flowforge.enums.StepType;
 import com.karimmajed.flowforge.exception.StepChangeException;
 import com.karimmajed.flowforge.repository.*;
 import com.karimmajed.flowforge.security.ResourceOwner;
@@ -13,8 +14,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 @Service
 public class WorkflowStepService {
@@ -48,6 +53,15 @@ public class WorkflowStepService {
             Long workflowId,
             CreateWorkflowStepRequest request,
             ResourceOwner owner) {
+        return create(workflowId, request, null, owner);
+    }
+
+    @Transactional
+    public WorkflowStepResponse create(
+            Long workflowId,
+            CreateWorkflowStepRequest request,
+            Long revision,
+            ResourceOwner owner) {
 
         Workflow workflow = workflowRepository
             .findByIdAndOwnerSubjectAndOwnerIssuer(
@@ -61,12 +75,28 @@ public class WorkflowStepService {
             request.configuration()
         );
 
-        if (stepRepository.existsByWorkflow_IdAndPosition(
-                workflowId, request.position())) {
+        if (revision != null && workflow.getStepRevision() != revision) {
+            throw conflict(STALE);
+        }
+
+        boolean occupied = stepRepository.existsByWorkflow_IdAndPosition(
+                workflowId, request.position());
+        if (occupied && request.stepType() != StepType.CONDITION) {
             throw new StepChangeException(
                     HttpStatus.CONFLICT,
                     "Workflow step position conflict",
                     "A step already exists at this position");
+        }
+        if (occupied) {
+            deferPositionUniqueness();
+            jdbc.update("""
+                    UPDATE workflow_steps
+                    SET position = position + 1
+                    WHERE workflow_id = ?
+                      AND position >= ?
+                    """,
+                    workflowId,
+                    request.position());
         }
 
         WorkflowStep step = new WorkflowStep(
@@ -79,7 +109,13 @@ public class WorkflowStepService {
         step.setConfiguration(request.configuration());
 
         stepRepository.save(step);
-        advance(workflow);
+        stepRepository.flush();
+        if (revision == null) {
+            advance(workflow);
+        } else {
+            advance(workflow, revision);
+        }
+        validateBranches(workflowId, false);
 
         return WorkflowStepResponse.from(step);
     }
@@ -110,6 +146,8 @@ public class WorkflowStepService {
 
         step.setName(name);
         step.setConfiguration(request.configuration());
+        stepRepository.flush();
+        validateBranches(workflowId, false);
         return new StepChange(WorkflowStepResponse.from(step), revision);
     }
 
@@ -129,6 +167,7 @@ public class WorkflowStepService {
         stepRepository.delete(step);
         stepRepository.flush();
         renumber(workflowId);
+        validateBranches(workflowId, true);
         return new StepListChange(currentSteps(workflowId), next);
     }
 
@@ -179,7 +218,103 @@ public class WorkflowStepService {
             }
         }
 
+        validateBranches(workflowId, true);
         return new StepListChange(currentSteps(workflowId), next);
+    }
+
+    private void validateBranches(Long workflowId, boolean rewriteOrder) {
+        List<WorkflowStep> steps = stepRepository.findByWorkflow_IdOrderByPositionAsc(workflowId);
+        if (steps == null || steps.isEmpty()) {
+            return;
+        }
+
+        Map<Long, WorkflowStep> byId = new HashMap<>();
+        for (WorkflowStep step : steps) {
+            byId.put(step.getId(), step);
+        }
+
+        Set<Long> used = new HashSet<>();
+        for (WorkflowStep step : steps) {
+            if (step.getStepType() != StepType.CONDITION) {
+                continue;
+            }
+            List<Long> trueSteps = branchIds(step, "trueSteps");
+            List<Long> falseSteps = branchIds(step, "falseSteps");
+            if (trueSteps.isEmpty() && falseSteps.isEmpty()) {
+                throw invalid("A condition needs at least one branch step");
+            }
+
+            List<Long> listed = new ArrayList<>();
+            listed.addAll(trueSteps);
+            listed.addAll(falseSteps);
+            for (Long id : listed) {
+                if (!used.add(id)) {
+                    throw invalid("A step is in more than one branch");
+                }
+                WorkflowStep target = byId.get(id);
+                if (target == null || id.equals(step.getId())) {
+                    throw invalid("A branch step is unknown");
+                }
+                if (target.getStepType() == StepType.CONDITION) {
+                    throw invalid("A branch cannot contain a condition");
+                }
+            }
+
+            int index = steps.indexOf(step);
+            if (index + listed.size() >= steps.size()) {
+                throw invalid("Branch steps must be the contiguous steps after the condition");
+            }
+            List<WorkflowStep> following = steps.subList(index + 1, index + 1 + listed.size());
+            List<Long> trueActual = ids(following.subList(0, trueSteps.size()));
+            List<Long> falseActual = ids(following.subList(trueSteps.size(), listed.size()));
+            if (!sameIds(trueActual, trueSteps) || !sameIds(falseActual, falseSteps)) {
+                throw invalid("Branch steps must be the contiguous steps after the condition");
+            }
+            if (!trueActual.equals(trueSteps) || !falseActual.equals(falseSteps)) {
+                if (!rewriteOrder) {
+                    throw invalid("Branch steps must be the contiguous steps after the condition");
+                }
+                Map<String, Object> configuration = new HashMap<>(
+                        step.getConfiguration() == null ? Map.of() : step.getConfiguration());
+                configuration.put("trueSteps", trueActual);
+                configuration.put("falseSteps", falseActual);
+                step.setConfiguration(configuration);
+            }
+        }
+    }
+
+    private List<Long> branchIds(WorkflowStep step, String key) {
+        Object value = step.getConfiguration() == null
+                ? null
+                : step.getConfiguration().get(key);
+        if (!(value instanceof List<?> list)) {
+            throw invalid("Branch steps must be arrays");
+        }
+        List<Long> ids = new ArrayList<>();
+        Set<Long> seen = new HashSet<>();
+        for (Object item : list) {
+            Long id = ConditionEvaluator.integralId(item);
+            if (id == null) {
+                throw invalid("Branch steps must be positive integers");
+            }
+            if (!seen.add(id)) {
+                throw invalid("A branch lists the same step twice");
+            }
+            ids.add(id);
+        }
+        return ids;
+    }
+
+    private static List<Long> ids(List<WorkflowStep> steps) {
+        List<Long> ids = new ArrayList<>();
+        for (WorkflowStep step : steps) {
+            ids.add(step.getId());
+        }
+        return ids;
+    }
+
+    private static boolean sameIds(List<Long> left, List<Long> right) {
+        return left.size() == right.size() && new HashSet<>(left).equals(new HashSet<>(right));
     }
 
     private List<WorkflowStepResponse> currentSteps(Long workflowId) {

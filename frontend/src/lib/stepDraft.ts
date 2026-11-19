@@ -16,6 +16,9 @@ export function configurationText(step: WorkflowStep): string {
       : []
     return fields.join(', ')
   }
+  if (step.stepType === 'CONDITION') {
+    return JSON.stringify(step.configuration)
+  }
   return typeof step.configuration.url === 'string' ? step.configuration.url : ''
 }
 
@@ -66,6 +69,9 @@ function configurationFromText(
       return { ok: false }
     }
     return { ok: true, configuration: { requiredFields: parsed.names } }
+  }
+  if (stepType === 'CONDITION') {
+    return { ok: false }
   }
   const parsed = buildHttpRequestConfiguration('GET', trimmed)
   if (!parsed.ok) {

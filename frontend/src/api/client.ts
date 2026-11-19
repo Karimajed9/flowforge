@@ -374,15 +374,16 @@ export function createWorkflowStep(
     stepType: WorkflowStep['stepType']
     position: number
     configuration: Record<string, unknown>
+    revision?: number
   },
   signal?: AbortSignal,
 ): Promise<WorkflowStep> {
-  return request(
-    `/api/workflows/${workflowId}/steps`,
-    signal,
-    'POST',
-    input,
-  ).then(parseWorkflowStep)
+  const { revision, ...body } = input
+  const path =
+    typeof revision === 'number'
+      ? `/api/workflows/${workflowId}/steps?revision=${revision}`
+      : `/api/workflows/${workflowId}/steps`
+  return request(path, signal, 'POST', body).then(parseWorkflowStep)
 }
 
 export async function loadWorkflowDetail(

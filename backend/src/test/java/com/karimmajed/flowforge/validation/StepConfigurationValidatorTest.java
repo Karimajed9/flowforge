@@ -245,8 +245,73 @@ class StepConfigurationValidatorTest {
                         "url is not an http address",
                         StepType.HTTP_REQUEST,
                         Map.of("method", "GET", "url", "not-a-url"),
-                        "A valid HTTPS URL is required")
+                        "A valid HTTPS URL is required"),
+                args(
+                        "unknown condition operator",
+                        StepType.CONDITION,
+                        condition("NOPE", 1, List.of(1), List.of()),
+                        "Condition operator is invalid"),
+                args(
+                        "condition extra field",
+                        StepType.CONDITION,
+                        extraCondition(),
+                        "CONDITION does not allow extra fields"),
+                args(
+                        "equals without a value",
+                        StepType.CONDITION,
+                        Map.of(
+                                "field", "amount",
+                                "operator", "EQUALS",
+                                "trueSteps", List.of(1),
+                                "falseSteps", List.of()),
+                        "Condition value is required"),
+                args(
+                        "exists with a value",
+                        StepType.CONDITION,
+                        Map.of(
+                                "field", "amount",
+                                "operator", "EXISTS",
+                                "value", 1,
+                                "trueSteps", List.of(1),
+                                "falseSteps", List.of()),
+                        "EXISTS does not take a value"),
+                args(
+                        "greater than with a numeric string",
+                        StepType.CONDITION,
+                        condition("GREATER_THAN", "10", List.of(1), List.of()),
+                        "Condition value must be a number"),
+                args(
+                        "blank condition field",
+                        StepType.CONDITION,
+                        condition("EQUALS", 1, List.of(1), List.of(), " "),
+                        "Condition field must be a top-level name"),
+                args(
+                        "dotted condition field",
+                        StepType.CONDITION,
+                        condition("EQUALS", 1, List.of(1), List.of(), "order.amount"),
+                        "Condition field must be a top-level name"),
+                args(
+                        "condition with no branch steps",
+                        StepType.CONDITION,
+                        condition("EQUALS", 1, List.of(), List.of()),
+                        "A condition needs at least one branch step")
         );
+    }
+
+    @Test
+    void acceptsEqualsAndExistsConditions() {
+        assertThatCode(() -> validator.validate(
+                StepType.CONDITION,
+                condition("EQUALS", 1, List.of(2), List.of(3))))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> validator.validate(
+                StepType.CONDITION,
+                Map.of(
+                        "field", "amount",
+                        "operator", "EXISTS",
+                        "trueSteps", List.of(),
+                        "falseSteps", List.of(3))))
+                .doesNotThrowAnyException();
     }
 
     private static void assertBadRequest(ResponseStatusException ex, String message) {
@@ -260,6 +325,35 @@ class StepConfigurationValidatorTest {
             Map<String, Object> configuration,
             String message) {
         return Arguments.of(name, stepType, configuration, message);
+    }
+
+    private static Map<String, Object> condition(
+            String operator,
+            Object value,
+            List<Integer> trueSteps,
+            List<Integer> falseSteps) {
+        return condition(operator, value, trueSteps, falseSteps, "amount");
+    }
+
+    private static Map<String, Object> condition(
+            String operator,
+            Object value,
+            List<Integer> trueSteps,
+            List<Integer> falseSteps,
+            String field) {
+        Map<String, Object> configuration = new HashMap<>();
+        configuration.put("field", field);
+        configuration.put("operator", operator);
+        configuration.put("value", value);
+        configuration.put("trueSteps", trueSteps);
+        configuration.put("falseSteps", falseSteps);
+        return configuration;
+    }
+
+    private static Map<String, Object> extraCondition() {
+        Map<String, Object> configuration = condition("EQUALS", 1, List.of(1), List.of());
+        configuration.put("note", "nope");
+        return configuration;
     }
 
     private static Map<String, Object> map(String key, Object value) {

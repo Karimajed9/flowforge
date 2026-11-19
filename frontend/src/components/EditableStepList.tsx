@@ -8,6 +8,20 @@ import {
   reorderWorkflowSteps,
   updateWorkflowStep,
 } from '../api/client.ts'
+import {
+  CONDITION_MESSAGES,
+  branchesFollowCondition,
+  buildConditionConfiguration,
+  conditionDraftDiffers,
+  deletionBreaksBranch,
+  emptyConditionDraft,
+  moveBreaksBranch,
+  readBranchIds,
+  readCondition,
+  savedOrder,
+  branchRole,
+  type ConditionDraft,
+} from '../lib/condition.ts'
 import { configurationText, stepDraftDiffers } from '../lib/stepDraft.ts'
 import {
   buildHttpRequestConfiguration,
@@ -15,6 +29,7 @@ import {
   parseRequiredFieldNames,
 } from '../lib/workflowForm.ts'
 import type { WorkflowStep } from '../types/workflow.ts'
+import { ConditionBranchControls, ConditionFields } from './ConditionFields.tsx'
 import { StepConfigurationSummary } from './StepConfigurationSummary.tsx'
 import { EmptyState } from './EmptyState.tsx'
 
@@ -40,17 +55,28 @@ export function EditableStepList({
   const [editingId, setEditingId] = useState<number | null>(null)
   const [draftName, setDraftName] = useState('')
   const [draftConfig, setDraftConfig] = useState('')
+  const [conditionDraft, setConditionDraft] = useState<ConditionDraft>(emptyConditionDraft())
+  const [trueSteps, setTrueSteps] = useState<number[]>([])
+  const [falseSteps, setFalseSteps] = useState<number[]>([])
   const [confirmId, setConfirmId] = useState<number | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const editingStep = steps.find((step) => step.id === editingId) ?? null
   const dirty =
     editingStep !== null &&
-    stepDraftDiffers(editingStep, {
-      name: draftName,
-      stepType: editingStep.stepType,
-      configurationText: draftConfig,
-    })
+    (editingStep.stepType === 'CONDITION'
+      ? conditionDraftDiffers(
+          editingStep,
+          draftName,
+          conditionDraft,
+          trueSteps,
+          falseSteps,
+        )
+      : stepDraftDiffers(editingStep, {
+          name: draftName,
+          stepType: editingStep.stepType,
+          configurationText: draftConfig,
+        }))
 
   useReportDirty('step-editor', dirty)
 
@@ -77,7 +103,36 @@ export function EditableStepList({
     setEditingId(step.id)
     setDraftName(step.name)
     setDraftConfig(configurationText(step))
+    if (step.stepType === 'CONDITION') {
+      const branches = readBranchIds(step.configuration)
+      setConditionDraft(readCondition(step.configuration))
+      setTrueSteps(branches?.trueSteps ?? [])
+      setFalseSteps(branches?.falseSteps ?? [])
+    }
     setError(null)
+  }
+
+  function configurationForSave(
+    step: WorkflowStep,
+  ):
+    | { ok: true; configuration: Record<string, unknown> }
+    | { ok: false; message: string } {
+    if (step.stepType === 'CONDITION') {
+      const built = buildConditionConfiguration(conditionDraft, trueSteps, falseSteps)
+      if (!built.ok) {
+        return built
+      }
+      const preview = savedOrder(
+        steps.map((item) =>
+          item.id === step.id ? { ...item, configuration: built.configuration } : item,
+        ),
+      )
+      if (!branchesFollowCondition(preview)) {
+        return { ok: false, message: CONDITION_MESSAGES.span }
+      }
+      return built
+    }
+    return configurationFor(step, draftConfig)
   }
 
   async function save(event: FormEvent<HTMLFormElement>, step: WorkflowStep) {
@@ -87,7 +142,7 @@ export function EditableStepList({
       setError(parsedName.message)
       return
     }
-    const configuration = configurationFor(step, draftConfig)
+    const configuration = configurationForSave(step)
     if (!configuration.ok) {
       setError(configuration.message)
       return
@@ -114,6 +169,11 @@ export function EditableStepList({
   }
 
   async function remove(step: WorkflowStep) {
+    const blocked = deletionBreaksBranch(steps, step.id)
+    if (blocked) {
+      setError(blocked)
+      return
+    }
     setPending(true)
     setError(null)
     try {
@@ -140,6 +200,11 @@ export function EditableStepList({
     }
     const nextIndex = index + direction
     if (nextIndex < 0 || nextIndex >= steps.length) {
+      return
+    }
+    const blocked = moveBreaksBranch(steps, index, direction)
+    if (blocked) {
+      setError(blocked)
       return
     }
     const order = steps.map((step) => step.id)
@@ -178,23 +243,45 @@ export function EditableStepList({
       {steps.length === 0 ? (
         <EmptyState
           title="No steps yet"
-          description="This workflow has no steps. Add a field check or an HTTPS GET below."
+          description="This workflow has no steps. Add a field check, an HTTPS GET, or a condition below."
         />
       ) : (
         <ol className="grid gap-4">
           {steps.map((step, index) => {
             const editing = editingId === step.id
+            const role = branchRole(steps, step.id)
+            const deleteBlocked = deletionBreaksBranch(steps, step.id)
             return (
               <li
                 key={step.id}
-                className="rounded-2xl border border-line bg-navy-900 p-5"
+                className={`rounded-2xl border bg-navy-900 p-5 ${
+                  step.stepType === 'CONDITION' ? 'border-amber-400/40' : 'border-line'
+                }`}
               >
                 <p className="text-xs font-semibold tracking-wide text-muted">
                   Position {step.position}
                 </p>
                 <h3 className="mt-1 text-lg font-semibold">{step.name}</h3>
-                <p className="mt-1 text-sm text-muted">{step.stepType}</p>
-                <StepConfigurationSummary step={step} />
+                <p
+                  className={`mt-1 text-sm ${
+                    step.stepType === 'CONDITION'
+                      ? 'font-semibold text-amber-200'
+                      : 'text-muted'
+                  }`}
+                >
+                  {step.stepType}
+                </p>
+                {role === 'true' ? (
+                  <p className="mt-1 text-xs font-semibold tracking-wide text-teal-300">
+                    TRUE branch
+                  </p>
+                ) : null}
+                {role === 'false' ? (
+                  <p className="mt-1 text-xs font-semibold tracking-wide text-rose-200">
+                    FALSE branch
+                  </p>
+                ) : null}
+                <StepConfigurationSummary step={step} steps={steps} />
                 <div className="mt-4 flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -237,28 +324,46 @@ export function EditableStepList({
                 </div>
                 {confirmId === step.id ? (
                   <div className="mt-4 rounded-xl border border-line bg-navy-950 p-4">
-                    <p className="text-sm leading-6 text-ink">
-                      Delete this step? Runs that already started keep the steps
-                      they began with.
-                    </p>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        className="rounded-lg bg-red-400 px-3 py-2 text-sm font-semibold text-navy-950 hover:bg-red-300 disabled:opacity-40"
-                        disabled={pending}
-                        onClick={() => void remove(step)}
-                      >
-                        {pending ? 'Deleting' : 'Confirm delete'}
-                      </button>
-                      <button
-                        type="button"
-                        className={quietButton}
-                        disabled={pending}
-                        onClick={() => setConfirmId(null)}
-                      >
-                        Keep step
-                      </button>
-                    </div>
+                    {deleteBlocked ? (
+                      <>
+                        <p className="text-sm leading-6 text-red-200" role="alert">
+                          {deleteBlocked}
+                        </p>
+                        <button
+                          type="button"
+                          className={`${quietButton} mt-3`}
+                          disabled={pending}
+                          onClick={() => setConfirmId(null)}
+                        >
+                          Keep step
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-sm leading-6 text-ink">
+                          Delete this step? Runs that already started keep the steps
+                          they began with.
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            className="rounded-lg bg-red-400 px-3 py-2 text-sm font-semibold text-navy-950 hover:bg-red-300 disabled:opacity-40"
+                            disabled={pending}
+                            onClick={() => void remove(step)}
+                          >
+                            {pending ? 'Deleting' : 'Confirm delete'}
+                          </button>
+                          <button
+                            type="button"
+                            className={quietButton}
+                            disabled={pending}
+                            onClick={() => setConfirmId(null)}
+                          >
+                            Keep step
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ) : null}
                 {editing ? (
@@ -278,6 +383,29 @@ export function EditableStepList({
                         className={`${fieldClass} mt-2`}
                       />
                     </label>
+                    {step.stepType === 'CONDITION' ? (
+                      <>
+                        <ConditionFields
+                          idPrefix={`step-condition-${step.id}`}
+                          draft={conditionDraft}
+                          onChange={(next) => {
+                            setConditionDraft(next)
+                            setError(null)
+                          }}
+                        />
+                        <ConditionBranchControls
+                          steps={steps}
+                          conditionId={step.id}
+                          trueSteps={trueSteps}
+                          falseSteps={falseSteps}
+                          onChange={(nextTrue, nextFalse) => {
+                            setTrueSteps(nextTrue)
+                            setFalseSteps(nextFalse)
+                            setError(null)
+                          }}
+                        />
+                      </>
+                    ) : null}
                     {step.stepType === 'VALIDATE_FIELDS' ? (
                       <label className="block text-sm" htmlFor={`step-fields-${step.id}`}>
                         Required field names
@@ -292,7 +420,8 @@ export function EditableStepList({
                           className={`${fieldClass} mt-2`}
                         />
                       </label>
-                    ) : (
+                    ) : null}
+                    {step.stepType === 'HTTP_REQUEST' ? (
                       <label className="block text-sm" htmlFor={`step-url-${step.id}`}>
                         HTTPS URL
                         <input
@@ -305,7 +434,7 @@ export function EditableStepList({
                           className={`${fieldClass} mt-2`}
                         />
                       </label>
-                    )}
+                    ) : null}
                     {step.stepType === 'HTTP_REQUEST' ? (
                       <p className="text-sm text-muted">Method: GET</p>
                     ) : null}
@@ -365,9 +494,12 @@ function configurationFor(
     }
     return { ok: true, configuration: { requiredFields: parsed.names } }
   }
-  const parsed = buildHttpRequestConfiguration('GET', draft)
-  if (!parsed.ok) {
-    return parsed
+  if (step.stepType === 'HTTP_REQUEST') {
+    const parsed = buildHttpRequestConfiguration('GET', draft)
+    if (!parsed.ok) {
+      return parsed
+    }
+    return { ok: true, configuration: parsed.configuration }
   }
-  return { ok: true, configuration: parsed.configuration }
+  return { ok: false, message: 'This step type cannot be saved from this form' }
 }

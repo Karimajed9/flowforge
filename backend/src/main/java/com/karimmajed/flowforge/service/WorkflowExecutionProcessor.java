@@ -82,8 +82,9 @@ public class WorkflowExecutionProcessor {
                     StepWork work = claim.work();
                     onStepStart.accept(work);
 
+                    Completion completion;
                     try {
-                        executeStep(work);
+                        completion = runClaimed(work);
                     } catch (StepFailure ex) {
                         if (!store.fail(work, ex.getMessage())) {
                             throw lostOwnership(executionId);
@@ -96,8 +97,6 @@ public class WorkflowExecutionProcessor {
                         return;
                     }
 
-                    Completion completion = store.complete(work);
-
                     if (completion == Completion.NOT_OWNER) {
                         throw lostOwnership(executionId);
                     }
@@ -109,6 +108,25 @@ public class WorkflowExecutionProcessor {
                 }
             }
         }
+    }
+
+    private Completion runClaimed(StepWork work) {
+        if (work.stepType() == StepType.CONDITION) {
+            try {
+                boolean taken = ConditionEvaluator.taken(
+                        work.configuration(),
+                        work.payload());
+                return store.completeCondition(
+                        work,
+                        taken,
+                        ConditionEvaluator.skippedIds(work.configuration(), taken));
+            } catch (ConditionEvaluator.InvalidCondition ex) {
+                throw new StepFailure(ex.getMessage());
+            }
+        }
+
+        executeStep(work);
+        return store.complete(work);
     }
 
     private void executeStep(StepWork work) {

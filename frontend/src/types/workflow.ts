@@ -10,7 +10,7 @@ export interface Workflow {
 export interface WorkflowStep {
   id: number
   name: string
-  stepType: 'VALIDATE_FIELDS' | 'HTTP_REQUEST'
+  stepType: 'VALIDATE_FIELDS' | 'HTTP_REQUEST' | 'CONDITION'
   position: number
   configuration: Record<string, unknown>
 }

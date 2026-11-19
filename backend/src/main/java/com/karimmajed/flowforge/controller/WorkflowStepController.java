@@ -2,6 +2,7 @@ package com.karimmajed.flowforge.controller;
 
 import com.karimmajed.flowforge.dto.*;
 import com.karimmajed.flowforge.security.CurrentCaller;
+import com.karimmajed.flowforge.security.ResourceOwner;
 import com.karimmajed.flowforge.service.WorkflowStepService;
 
 import jakarta.validation.Valid;
@@ -22,14 +23,25 @@ public class WorkflowStepController {
         this.caller = caller;
     }
 
+    public ResponseEntity<WorkflowStepResponse> create(
+            Long workflowId,
+            CreateWorkflowStepRequest request) {
+        return create(workflowId, null, request);
+    }
+
     @PostMapping
     public ResponseEntity<WorkflowStepResponse> create(
             @PathVariable Long workflowId,
+            @RequestParam(required = false) Long revision,
             @Valid @RequestBody CreateWorkflowStepRequest request) {
 
+        ResourceOwner owner = caller.require();
+        WorkflowStepResponse created = revision == null
+                ? service.create(workflowId, request, owner)
+                : service.create(workflowId, request, revision, owner);
         return ResponseEntity
             .status(HttpStatus.CREATED)
-            .body(service.create(workflowId, request, caller.require()));
+            .body(created);
     }
 
     @GetMapping

@@ -230,7 +230,13 @@ test('workflow detail loads the workflow and ordered steps', async () => {
   const names = screen
     .getAllByRole('heading', { level: 3 })
     .map((heading) => heading.textContent)
-  expect(names).toEqual(['Check fields', 'Call API', 'Add field check', 'Add HTTPS GET'])
+  expect(names).toEqual([
+    'Check fields',
+    'Call API',
+    'Add field check',
+    'Add HTTPS GET',
+    'Add condition',
+  ])
   expect(screen.getByText('Required fields: email')).toBeTruthy()
   expect(screen.getByText('GET https://example.com/hook')).toBeTruthy()
   expect(screen.getByText('Step count').parentElement?.textContent).toContain('2')
@@ -325,7 +331,7 @@ test('adding an HTTPS GET step sends method GET', async () => {
   renderAt('/workflows/4')
   expect(await screen.findByRole('heading', { name: 'Add HTTPS GET' })).toBeTruthy()
   expect(screen.queryByRole('option', { name: 'POST' })).toBeNull()
-  expect(screen.queryByRole('combobox')).toBeNull()
+  expect(screen.getByText('Method').nextElementSibling?.textContent).toBe('GET')
   fireEvent.change(input('http-step-name'), { target: { value: 'Call API' } })
   fireEvent.change(input('http-step-position'), { target: { value: '2' } })
   fireEvent.change(input('http-step-url'), {

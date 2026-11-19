@@ -79,11 +79,19 @@ function WorkflowDetailContent({
   }
 
   function addStep(step: WorkflowStep) {
-    setSteps((current) =>
-      [...current, step].sort(
+    setSteps((current) => {
+      const occupied = current.some((item) => item.position === step.position)
+      const shifted = occupied
+        ? current.map((item) =>
+            item.position >= step.position
+              ? { ...item, position: item.position + 1 }
+              : item,
+          )
+        : current
+      return [...shifted, step].sort(
         (left, right) => left.position - right.position || left.id - right.id,
-      ),
-    )
+      )
+    })
     setRevision((current) => current + 1)
   }
 
@@ -111,7 +119,12 @@ function WorkflowDetailContent({
           New steps are used by later runs. A run that already started keeps
           the steps it began with.
         </p>
-        <CreateStepForms workflowId={workflow.id} onCreated={addStep} />
+        <CreateStepForms
+          workflowId={workflow.id}
+          steps={steps}
+          revision={revision}
+          onCreated={addStep}
+        />
       </section>
     </div>
   )
