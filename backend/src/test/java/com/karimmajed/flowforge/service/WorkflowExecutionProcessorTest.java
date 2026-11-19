@@ -138,15 +138,15 @@ class WorkflowExecutionProcessorTest {
     }
 
     @Test
-    void runningExecutionIsRejected() {
+    void duplicateRunningDeliveryIsAcknowledged() {
         when(store.claimNext(21L)).thenReturn(Claim.busy());
 
-        NonRetryableExecutionException ex = assertThrows(
-                NonRetryableExecutionException.class,
-                () -> processor.process(21L));
+        processor.process(21L);
 
-        assertThat(ex.getMessage()).isEqualTo("Unexpected RUNNING execution: 21");
         verify(store, never()).complete(org.mockito.ArgumentMatchers.any());
+        verify(store, never()).fail(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
         verify(httpGet, never()).get(org.mockito.ArgumentMatchers.anyString());
     }
 

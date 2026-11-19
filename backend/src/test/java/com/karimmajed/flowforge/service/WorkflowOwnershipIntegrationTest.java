@@ -593,7 +593,10 @@ class WorkflowOwnershipIntegrationTest {
         var created = workflowsApi().create(supplied).getBody();
         assertThat(created).isNotNull();
         assertThat(ownerOf(created.id())).isEqualTo(USER_A);
-        assertThat(created.toString()).doesNotContain("user-b", "evil.example", "99");
+        assertThat(created.name()).isEqualTo("From token");
+        assertThat(created.description()).isEqualTo("notes");
+        assertThat(created.toString())
+                .doesNotContain("user-b", "evil.example", "ownerSubject", "ownerIssuer", "ownerId");
 
         authenticate("user-a", OTHER_ISSUER.issuer(), "flowforge.user");
         var other = workflowsApi().create(new CreateWorkflowRequest("Other issuer", null)).getBody();

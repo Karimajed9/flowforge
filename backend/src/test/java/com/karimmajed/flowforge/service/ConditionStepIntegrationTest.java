@@ -11,7 +11,6 @@ import com.karimmajed.flowforge.dto.WorkflowStepResponse;
 import com.karimmajed.flowforge.enums.ExecutionStatus;
 import com.karimmajed.flowforge.enums.ExecutionStepStatus;
 import com.karimmajed.flowforge.enums.StepType;
-import com.karimmajed.flowforge.exception.NonRetryableExecutionException;
 import com.karimmajed.flowforge.exception.StepChangeException;
 import com.karimmajed.flowforge.http.HttpsGetExecutor;
 import com.karimmajed.flowforge.security.ResourceOwner;
@@ -261,9 +260,8 @@ class ConditionStepIntegrationTest {
 
         checkpoints.claimNext(executionId);
 
-        assertThatThrownBy(() -> processor.process(executionId))
-                .isInstanceOf(NonRetryableExecutionException.class)
-                .hasMessage("Unexpected RUNNING execution: " + executionId);
+        processor.process(executionId);
+
         assertThat(jdbc.queryForObject(
                 """
                 SELECT COUNT(*)
@@ -273,6 +271,15 @@ class ConditionStepIntegrationTest {
                 """,
                 Integer.class,
                 executionId)).isZero();
+        assertThat(jdbc.queryForObject(
+                """
+                SELECT branch_taken
+                FROM execution_step_checkpoints
+                WHERE execution_id = ?
+                  AND status = 'RUNNING'
+                """,
+                Boolean.class,
+                executionId)).isNull();
         assertThat(status(executionId)).isEqualTo("RUNNING");
     }
 

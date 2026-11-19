@@ -241,7 +241,7 @@ class WorkflowExecutionCheckpointIntegrationTest {
                 }
             }
 
-            assertThat(firstFinished).startsWith("409 ");
+            assertThat(firstFinished).isEqualTo("ok");
             release.countDown();
 
             List<String> results = new ArrayList<>();
@@ -249,7 +249,7 @@ class WorkflowExecutionCheckpointIntegrationTest {
                 results.add(future.get(10, TimeUnit.SECONDS));
             }
 
-            assertThat(results).containsExactlyInAnyOrder("ok", firstFinished);
+            assertThat(results).containsExactly("ok", "ok");
             assertThat(starts).hasValue(1);
             assertThat(executionStatus(executionId)).isEqualTo("SUCCEEDED");
             assertThat(checkpoints(executionId)).containsExactly(
@@ -290,12 +290,8 @@ class WorkflowExecutionCheckpointIntegrationTest {
                 """,
                 executionId);
         processor.setOnStepStart(null);
-        NonRetryableExecutionException redelivery = assertThrows(
-                NonRetryableExecutionException.class,
-                () -> processor.process(executionId));
+        processor.process(executionId);
 
-        assertThat(redelivery.getMessage())
-                .isEqualTo("Unexpected RUNNING execution: " + executionId);
         assertThat(starts).hasValue(1);
         assertThat(attemptToken(executionId)).isEqualTo(token);
         assertThat(executionStatus(executionId)).isEqualTo("RUNNING");
@@ -587,12 +583,8 @@ class WorkflowExecutionCheckpointIntegrationTest {
                 executionId);
         transport.fail(new IllegalStateException("must not send again"));
 
-        NonRetryableExecutionException redelivery = assertThrows(
-                NonRetryableExecutionException.class,
-                () -> processor.process(executionId));
+        processor.process(executionId);
 
-        assertThat(redelivery.getMessage())
-                .isEqualTo("Unexpected RUNNING execution: " + executionId);
         assertThat(transport.uris).hasSize(1);
         assertThat(checkpoints(executionId)).containsExactly(
                 new SavedCheckpoint(httpId, "RUNNING", 1, null));
@@ -633,12 +625,8 @@ class WorkflowExecutionCheckpointIntegrationTest {
         assertThat(checkpoints(executionId)).containsExactly(
                 new SavedCheckpoint(httpId, "RUNNING", 1, null));
 
-        NonRetryableExecutionException redelivery = assertThrows(
-                NonRetryableExecutionException.class,
-                () -> processor.process(executionId));
+        processor.process(executionId);
 
-        assertThat(redelivery.getMessage())
-                .isEqualTo("Unexpected RUNNING execution: " + executionId);
         assertThat(transport.uris).hasSize(1);
     }
 

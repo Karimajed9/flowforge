@@ -20,7 +20,14 @@ import java.util.UUID;
 @Service
 public class ExecutionCheckpointStore {
 
+    /**
+     * Hard cap for one claimed step. Nothing extends it. HTTP GET must
+     * finish a margin before this; see {@code HttpsGetExecutor}.
+     */
     public static final Duration LEASE = Duration.ofMinutes(2);
+
+    static final String LEASE_EXPIRED =
+            "Execution lease expired during step %s; outcome may be unknown.";
 
     static final String NO_STEPS = "Workflow contains no steps";
 
@@ -161,8 +168,9 @@ public class ExecutionCheckpointStore {
                 .anyMatch(checkpoint -> checkpoint.stepId() == next.id());
 
         if (alreadyClaimed) {
-            // A RUNNING checkpoint is left in place, including after its
-            // lease expires. A later delivery must not start that step again.
+            // The step was already claimed. Do not start it again, whether
+            // or not the lease is still valid. Lease expiry is finalized by
+            // ExecutionLeaseRecovery, not by this delivery.
             return Claim.busy();
         }
 
@@ -171,6 +179,7 @@ public class ExecutionCheckpointStore {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Completion complete(StepWork work) {
+        lockExecution(work.executionId());
         if (!markOwned(work, "SUCCEEDED", null)) {
             return Completion.NOT_OWNER;
         }
@@ -180,6 +189,7 @@ public class ExecutionCheckpointStore {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Completion completeCondition(StepWork work, boolean branchTaken, List<Long> skippedStepIds) {
+        lockExecution(work.executionId());
         int updated = jdbc.update("""
                 UPDATE execution_step_checkpoints
                 SET status = 'SUCCEEDED',
@@ -272,6 +282,7 @@ public class ExecutionCheckpointStore {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean fail(StepWork work, String reason) {
         String message = truncate(reason);
+        lockExecution(work.executionId());
 
         if (!markOwned(work, "FAILED", message)) {
             return false;
@@ -286,6 +297,116 @@ public class ExecutionCheckpointStore {
         }
 
         return true;
+    }
+
+    public List<Long> expiredExecutionIds(int limit) {
+        return jdbc.query("""
+                SELECT c.execution_id
+                FROM execution_step_checkpoints c
+                JOIN workflow_executions e ON e.id = c.execution_id
+                WHERE c.status = 'RUNNING'
+                  AND c.lease_until <= CURRENT_TIMESTAMP
+                  AND e.status = 'RUNNING'
+                ORDER BY c.execution_id
+                LIMIT ?
+                """,
+                (rs, rowNum) -> rs.getLong("execution_id"),
+                limit);
+    }
+
+    /**
+     * Fails one expired claim. The execution row is locked before the
+     * checkpoint, which is the same order as claim, complete, and abandon.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public boolean recoverIfExpired(long executionId) {
+        List<String> status = jdbc.query("""
+                SELECT status
+                FROM workflow_executions
+                WHERE id = ?
+                FOR UPDATE
+                """,
+                (rs, rowNum) -> rs.getString("status"),
+                executionId);
+
+        if (status.isEmpty() || !"RUNNING".equals(status.get(0))) {
+            return false;
+        }
+
+        List<ExpiredStep> expired = jdbc.query("""
+                SELECT c.workflow_step_id,
+                       d.name
+                FROM execution_step_checkpoints c
+                LEFT JOIN execution_step_definitions d
+                  ON d.execution_id = c.execution_id
+                 AND d.workflow_step_id = c.workflow_step_id
+                WHERE c.execution_id = ?
+                  AND c.status = 'RUNNING'
+                  AND c.lease_until <= CURRENT_TIMESTAMP
+                FOR UPDATE OF c
+                """,
+                (rs, rowNum) -> new ExpiredStep(
+                        rs.getLong("workflow_step_id"),
+                        rs.getString("name")),
+                executionId);
+
+        if (expired.isEmpty()) {
+            return false;
+        }
+
+        ExpiredStep step = expired.get(0);
+        String stepName = step.name() == null || step.name().isBlank()
+                ? Long.toString(step.stepId())
+                : step.name();
+        String reason = truncate(LEASE_EXPIRED.formatted(stepName));
+        int checkpointUpdated = jdbc.update("""
+                UPDATE execution_step_checkpoints
+                SET status = 'FAILED',
+                    failure_reason = ?,
+                    attempt_token = ?,
+                    lease_until = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE execution_id = ?
+                  AND workflow_step_id = ?
+                  AND status = 'RUNNING'
+                  AND lease_until <= CURRENT_TIMESTAMP
+                """,
+                reason,
+                UUID.randomUUID().toString(),
+                executionId,
+                step.stepId());
+
+        if (checkpointUpdated != 1) {
+            return false;
+        }
+
+        int executionUpdated = jdbc.update("""
+                UPDATE workflow_executions
+                SET status = 'FAILED',
+                    failure_reason = ?
+                WHERE id = ?
+                  AND status = 'RUNNING'
+                """,
+                reason,
+                executionId);
+
+        if (executionUpdated != 1) {
+            throw new IllegalStateException(
+                    "Execution status changed while recovering " + executionId);
+        }
+
+        return true;
+    }
+
+    private void lockExecution(long executionId) {
+        jdbc.query("""
+                SELECT id
+                FROM workflow_executions
+                WHERE id = ?
+                FOR UPDATE
+                """,
+                (rs, rowNum) -> rs.getLong("id"),
+                executionId);
     }
 
     private static boolean finished(String status) {
@@ -468,4 +589,6 @@ public class ExecutionCheckpointStore {
             String status,
             String failureReason
     ) {}
+
+    private record ExpiredStep(long stepId, String name) {}
 }
