@@ -55,8 +55,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 /**
- * Publishes a duplicate delivery through RabbitMQ and expects the broker
- * policy, not a queue argument, to dead-letter it.
+ * A duplicate delivery of a live claim is acknowledged. A message the
+ * listener permanently rejects is still dead-lettered by the broker policy.
  *
  * <p>The missing-policy startup guard is not repeated here.
  * {@code ExecutionConsumerStartupTest.missingPolicyRefusesToStartTheConsumer}
@@ -152,6 +152,9 @@ class DeadLetterRoutingIntegrationTest {
     @Autowired
     private WorkflowExecutionProcessor processor;
 
+    @Autowired
+    private ExecutionLeaseRecovery recovery;
+
     private final ScriptedHttp transport = new ScriptedHttp();
 
     private final AtomicInteger listenerAttempts = new AtomicInteger();
@@ -178,7 +181,7 @@ class DeadLetterRoutingIntegrationTest {
 
     @Test
     @Timeout(60)
-    void duplicateRunningDeliveryIsDeadLetteredWithoutAnotherHttpCall() throws Exception {
+    void duplicateRunningDeliveryIsAcknowledgedWithoutAnotherHttpCall() throws Exception {
         MessageListenerContainer container = registry.getListenerContainer(
                 ExecutionMessageListener.LISTENER_ID);
         assertThat(container).isNotNull();
@@ -194,23 +197,52 @@ class DeadLetterRoutingIntegrationTest {
         rabbitTemplate.convertAndSend(
                 RabbitMqConfig.EXCHANGE,
                 RabbitMqConfig.ROUTING_KEY,
-                Long.toString(executionId));
-
+                "not-an-id");
         Message dead = rabbitTemplate.receive(
                 RabbitMqConfig.DEAD_LETTER_QUEUE,
                 15_000);
         assertThat(dead).isNotNull();
         assertThat(rabbitTemplate.getMessageConverter().fromMessage(dead))
-                .isEqualTo(Long.toString(executionId));
-        assertThat(listenerAttempts).hasValue(1);
-        assertThat(transport.uris).isEmpty();
-
+                .isEqualTo("not-an-id");
         Map<String, ?> death = dead.getMessageProperties().getXDeathHeader().get(0);
         assertThat(death.get("reason")).isEqualTo("rejected");
         assertThat(death.get("queue")).isEqualTo(RabbitMqConfig.QUEUE);
         assertThat(death.get("exchange")).isEqualTo(RabbitMqConfig.EXCHANGE);
         assertThat(((Number) death.get("count")).longValue()).isEqualTo(1L);
+
+        rabbitTemplate.convertAndSend(
+                RabbitMqConfig.EXCHANGE,
+                RabbitMqConfig.ROUTING_KEY,
+                Long.toString(executionId));
+
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() ->
+                assertThat(listenerAttempts).hasValue(1));
+        assertThat(rabbitTemplate.receive(RabbitMqConfig.DEAD_LETTER_QUEUE, 500))
+                .isNull();
+        assertThat(transport.uris).isEmpty();
         assertUnchanged(executionId, stepId, token, 1);
+
+        jdbc.update("""
+                UPDATE execution_step_checkpoints
+                SET lease_until = CURRENT_TIMESTAMP - INTERVAL '1 minute'
+                WHERE execution_id = ?
+                """,
+                executionId);
+        rabbitTemplate.convertAndSend(
+                RabbitMqConfig.DEAD_LETTER_EXCHANGE,
+                RabbitMqConfig.DEAD_LETTER_ROUTING_KEY,
+                Long.toString(executionId));
+        recovery.recoverBatch();
+        assertThat(status(executionId)).isEqualTo("FAILED");
+        assertThat(jdbc.queryForObject(
+                "SELECT failure_reason FROM workflow_executions WHERE id = ?",
+                String.class,
+                executionId))
+                .isEqualTo("Execution lease expired during step Notify; outcome may be unknown.");
+        Message parked = rabbitTemplate.receive(RabbitMqConfig.DEAD_LETTER_QUEUE, 5_000);
+        assertThat(parked).isNotNull();
+        assertThat(rabbitTemplate.getMessageConverter().fromMessage(parked))
+                .isEqualTo(Long.toString(executionId));
 
         long validId = insertExecution(workflowId, "QUEUED");
         transport.respond(200, new byte[0]);
@@ -226,7 +258,17 @@ class DeadLetterRoutingIntegrationTest {
         assertThat(listenerAttempts).hasValue(2);
         assertThat(rabbitTemplate.receive(RabbitMqConfig.DEAD_LETTER_QUEUE, 500))
                 .isNull();
-        assertUnchanged(executionId, stepId, token, 1);
+        assertThat(status(executionId)).isEqualTo("FAILED");
+        assertThat(jdbc.queryForObject(
+                """
+                SELECT status
+                FROM execution_step_checkpoints
+                WHERE execution_id = ?
+                  AND workflow_step_id = ?
+                """,
+                String.class,
+                executionId,
+                stepId)).isEqualTo("FAILED");
     }
 
     private void assertIsolatedContainers() {

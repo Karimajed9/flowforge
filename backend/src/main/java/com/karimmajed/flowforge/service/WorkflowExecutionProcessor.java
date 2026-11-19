@@ -75,8 +75,12 @@ public class WorkflowExecutionProcessor {
                     return;
                 }
 
-                case BUSY -> throw new NonRetryableExecutionException(
-                        "Unexpected RUNNING execution: " + executionId);
+                case BUSY -> {
+                    log.info(
+                            "Execution {} is already running. Acknowledging the duplicate delivery.",
+                            executionId);
+                    return;
+                }
 
                 case STEP -> {
                     StepWork work = claim.work();
