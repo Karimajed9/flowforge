@@ -25,8 +25,11 @@ import {
 import { configurationText, stepDraftDiffers } from '../lib/stepDraft.ts'
 import {
   buildHttpRequestConfiguration,
+  httpDraftDiffers,
+  httpDraftFrom,
   parseName,
   parseRequiredFieldNames,
+  type HttpDraft,
 } from '../lib/workflowForm.ts'
 import type { WorkflowStep } from '../types/workflow.ts'
 import { ConditionBranchControls, ConditionFields } from './ConditionFields.tsx'
@@ -55,6 +58,12 @@ export function EditableStepList({
   const [editingId, setEditingId] = useState<number | null>(null)
   const [draftName, setDraftName] = useState('')
   const [draftConfig, setDraftConfig] = useState('')
+  const [httpDraft, setHttpDraft] = useState<HttpDraft>({
+    method: 'GET',
+    url: '',
+    bodySource: 'STATIC_JSON',
+    bodyText: '',
+  })
   const [conditionDraft, setConditionDraft] = useState<ConditionDraft>(emptyConditionDraft())
   const [trueSteps, setTrueSteps] = useState<number[]>([])
   const [falseSteps, setFalseSteps] = useState<number[]>([])
@@ -72,11 +81,14 @@ export function EditableStepList({
           trueSteps,
           falseSteps,
         )
-      : stepDraftDiffers(editingStep, {
-          name: draftName,
-          stepType: editingStep.stepType,
-          configurationText: draftConfig,
-        }))
+      : editingStep.stepType === 'HTTP_REQUEST'
+        ? draftName.trim() !== editingStep.name.trim() ||
+          httpDraftDiffers(editingStep.configuration, httpDraft)
+        : stepDraftDiffers(editingStep, {
+            name: draftName,
+            stepType: editingStep.stepType,
+            configurationText: draftConfig,
+          }))
 
   useReportDirty('step-editor', dirty)
 
@@ -103,6 +115,9 @@ export function EditableStepList({
     setEditingId(step.id)
     setDraftName(step.name)
     setDraftConfig(configurationText(step))
+    if (step.stepType === 'HTTP_REQUEST') {
+      setHttpDraft(httpDraftFrom(step.configuration))
+    }
     if (step.stepType === 'CONDITION') {
       const branches = readBranchIds(step.configuration)
       setConditionDraft(readCondition(step.configuration))
@@ -131,6 +146,16 @@ export function EditableStepList({
         return { ok: false, message: CONDITION_MESSAGES.span }
       }
       return built
+    }
+    if (step.stepType === 'HTTP_REQUEST') {
+      const parsed = buildHttpRequestConfiguration(httpDraft.method, httpDraft.url, {
+        source: httpDraft.bodySource,
+        text: httpDraft.bodyText,
+      })
+      if (!parsed.ok) {
+        return parsed
+      }
+      return { ok: true, configuration: parsed.configuration }
     }
     return configurationFor(step, draftConfig)
   }
@@ -422,21 +447,78 @@ export function EditableStepList({
                       </label>
                     ) : null}
                     {step.stepType === 'HTTP_REQUEST' ? (
-                      <label className="block text-sm" htmlFor={`step-url-${step.id}`}>
-                        HTTPS URL
-                        <input
-                          id={`step-url-${step.id}`}
-                          value={draftConfig}
-                          onChange={(event) => {
-                            setDraftConfig(event.target.value)
-                            setError(null)
-                          }}
-                          className={`${fieldClass} mt-2`}
-                        />
-                      </label>
-                    ) : null}
-                    {step.stepType === 'HTTP_REQUEST' ? (
-                      <p className="text-sm text-muted">Method: GET</p>
+                      <>
+                        <label className="block text-sm" htmlFor={`step-method-${step.id}`}>
+                          Method
+                          <select
+                            id={`step-method-${step.id}`}
+                            value={httpDraft.method}
+                            onChange={(event) => {
+                              setHttpDraft({
+                                ...httpDraft,
+                                method: event.target.value === 'POST' ? 'POST' : 'GET',
+                              })
+                              setError(null)
+                            }}
+                            className={`${fieldClass} mt-2`}
+                          >
+                            <option value="GET">GET</option>
+                            <option value="POST">POST</option>
+                          </select>
+                        </label>
+                        <label className="block text-sm" htmlFor={`step-url-${step.id}`}>
+                          HTTPS URL
+                          <input
+                            id={`step-url-${step.id}`}
+                            value={httpDraft.url}
+                            onChange={(event) => {
+                              setHttpDraft({ ...httpDraft, url: event.target.value })
+                              setError(null)
+                            }}
+                            className={`${fieldClass} mt-2`}
+                          />
+                        </label>
+                        {httpDraft.method === 'POST' ? (
+                          <>
+                            <label className="block text-sm" htmlFor={`step-body-source-${step.id}`}>
+                              Body source
+                              <select
+                                id={`step-body-source-${step.id}`}
+                                value={httpDraft.bodySource}
+                                onChange={(event) => {
+                                  setHttpDraft({
+                                    ...httpDraft,
+                                    bodySource:
+                                      event.target.value === 'WORKFLOW_PAYLOAD'
+                                        ? 'WORKFLOW_PAYLOAD'
+                                        : 'STATIC_JSON',
+                                  })
+                                  setError(null)
+                                }}
+                                className={`${fieldClass} mt-2`}
+                              >
+                                <option value="STATIC_JSON">Static JSON</option>
+                                <option value="WORKFLOW_PAYLOAD">Workflow payload</option>
+                              </select>
+                            </label>
+                            {httpDraft.bodySource === 'STATIC_JSON' ? (
+                              <label className="block text-sm" htmlFor={`step-body-${step.id}`}>
+                                JSON body
+                                <textarea
+                                  id={`step-body-${step.id}`}
+                                  value={httpDraft.bodyText}
+                                  rows={5}
+                                  onChange={(event) => {
+                                    setHttpDraft({ ...httpDraft, bodyText: event.target.value })
+                                    setError(null)
+                                  }}
+                                  className={`${fieldClass} mt-2 font-mono`}
+                                />
+                              </label>
+                            ) : null}
+                          </>
+                        ) : null}
+                      </>
                     ) : null}
                     {error ? (
                       <p className="text-sm text-red-200" role="alert">

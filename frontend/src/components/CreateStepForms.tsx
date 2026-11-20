@@ -45,7 +45,7 @@ export function CreateStepForms({
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <ValidateFieldsForm workflowId={workflowId} steps={steps} onCreated={onCreated} />
-      <HttpGetForm workflowId={workflowId} steps={steps} onCreated={onCreated} />
+      <HttpRequestForm workflowId={workflowId} steps={steps} onCreated={onCreated} />
       <CreateConditionForm
         workflowId={workflowId}
         steps={steps}
@@ -171,7 +171,7 @@ function ValidateFieldsForm({
   )
 }
 
-function HttpGetForm({
+function HttpRequestForm({
   workflowId,
   steps,
   onCreated,
@@ -182,10 +182,16 @@ function HttpGetForm({
 }) {
   const [name, setName] = useState('')
   const [position, setPosition] = useState('')
+  const [method, setMethod] = useState<'GET' | 'POST'>('GET')
   const [url, setUrl] = useState('')
+  const [bodySource, setBodySource] = useState<'STATIC_JSON' | 'WORKFLOW_PAYLOAD'>('STATIC_JSON')
+  const [bodyText, setBodyText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
-  useReportDirty('add-https-get', name !== '' || position !== '' || url !== '')
+  useReportDirty(
+    'add-https-get',
+    name !== '' || position !== '' || url !== '' || method !== 'GET' || bodyText !== '',
+  )
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -199,7 +205,10 @@ function HttpGetForm({
       setError(parsedPosition.message)
       return
     }
-    const configuration = buildHttpRequestConfiguration('GET', url)
+    const configuration = buildHttpRequestConfiguration(method, url, {
+      source: bodySource,
+      text: bodyText,
+    })
     if (!configuration.ok) {
       setError(configuration.message)
       return
@@ -223,6 +232,9 @@ function HttpGetForm({
       setName('')
       setPosition('')
       setUrl('')
+      setMethod('GET')
+      setBodySource('STATIC_JSON')
+      setBodyText('')
     } catch (caught) {
       setError(addStepError(caught))
     } finally {
@@ -237,7 +249,9 @@ function HttpGetForm({
       }}
       className="rounded-2xl border border-line bg-navy-900 p-5"
     >
-      <h3 className="text-base font-semibold">Add HTTPS GET</h3>
+      <h3 className="text-base font-semibold">
+        {method === 'POST' ? 'Add HTTPS POST' : 'Add HTTPS GET'}
+      </h3>
       <div className="mt-4 grid gap-3">
         <label className="block text-sm" htmlFor="http-step-name">
           Name
@@ -258,21 +272,69 @@ function HttpGetForm({
             className={`${fieldClass} mt-2`}
           />
         </label>
-        <div className="text-sm">
-          <p>Method</p>
-          <p className="mt-2 rounded-lg border border-line bg-navy-950 px-3 py-2 text-ink">
-            GET
-          </p>
-        </div>
+        <label className="block text-sm" htmlFor="http-step-method">
+          Method
+          <select
+            id="http-step-method"
+            value={method}
+            onChange={(event) => {
+              setMethod(event.target.value === 'POST' ? 'POST' : 'GET')
+              setError(null)
+            }}
+            className={`${fieldClass} mt-2`}
+          >
+            <option value="GET">GET</option>
+            <option value="POST">POST</option>
+          </select>
+        </label>
         <label className="block text-sm" htmlFor="http-step-url">
           HTTPS URL
           <input
             id="http-step-url"
             value={url}
-            onChange={(event) => setUrl(event.target.value)}
+            onChange={(event) => {
+              setUrl(event.target.value)
+              setError(null)
+            }}
             className={`${fieldClass} mt-2`}
           />
         </label>
+        {method === 'POST' ? (
+          <>
+            <label className="block text-sm" htmlFor="http-step-body-source">
+              Body source
+              <select
+                id="http-step-body-source"
+                value={bodySource}
+                onChange={(event) => {
+                  setBodySource(
+                    event.target.value === 'WORKFLOW_PAYLOAD' ? 'WORKFLOW_PAYLOAD' : 'STATIC_JSON',
+                  )
+                  setError(null)
+                }}
+                className={`${fieldClass} mt-2`}
+              >
+                <option value="STATIC_JSON">Static JSON</option>
+                <option value="WORKFLOW_PAYLOAD">Workflow payload</option>
+              </select>
+            </label>
+            {bodySource === 'STATIC_JSON' ? (
+              <label className="block text-sm" htmlFor="http-step-body">
+                JSON body
+                <textarea
+                  id="http-step-body"
+                  value={bodyText}
+                  rows={5}
+                  onChange={(event) => {
+                    setBodyText(event.target.value)
+                    setError(null)
+                  }}
+                  className={`${fieldClass} mt-2 font-mono`}
+                />
+              </label>
+            ) : null}
+          </>
+        ) : null}
       </div>
       {error ? (
         <p className="mt-3 text-sm text-red-200" role="alert">
@@ -284,7 +346,7 @@ function HttpGetForm({
         disabled={pending}
         className="mt-4 rounded-lg bg-teal-500 px-4 py-2 text-sm font-semibold text-navy-950 hover:bg-teal-400 disabled:opacity-50"
       >
-        {pending ? 'Adding' : 'Add HTTPS GET'}
+        {pending ? 'Adding' : method === 'POST' ? 'Add HTTPS POST' : 'Add HTTPS GET'}
       </button>
     </form>
   )

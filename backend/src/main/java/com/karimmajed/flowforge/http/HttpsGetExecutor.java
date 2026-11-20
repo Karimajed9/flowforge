@@ -5,6 +5,8 @@ import com.karimmajed.flowforge.validation.StepConfigurationValidator;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.stereotype.Component;
@@ -129,6 +131,17 @@ public class HttpsGetExecutor {
     }
 
     public HttpGetResult get(String url) {
+        return call(url, HttpMethod.GET, null);
+    }
+
+    public HttpGetResult post(String url, byte[] jsonBody) {
+        if (jsonBody == null) {
+            throw new IllegalArgumentException("HTTP body must be JSON");
+        }
+        return call(url, HttpMethod.POST, jsonBody);
+    }
+
+    private HttpGetResult call(String url, HttpMethod method, byte[] jsonBody) {
         long started = System.nanoTime();
 
         URI uri;
@@ -154,7 +167,7 @@ public class HttpsGetExecutor {
         }
 
         try {
-            return exchange(uri, started);
+            return exchange(uri, started, method, jsonBody);
         } catch (ResourceAccessException ex) {
             if (isTimeout(ex)) {
                 return timeout(started);
@@ -163,11 +176,21 @@ public class HttpsGetExecutor {
         }
     }
 
-    private HttpGetResult exchange(URI uri, long started) {
-        return restClient.get()
-                .uri(uri)
-                .exchange((request, response) -> {
-                    try (ClientHttpResponse ignored = response) {
+    private HttpGetResult exchange(
+            URI uri,
+            long started,
+            HttpMethod method,
+            byte[] jsonBody) {
+
+        RestClient.RequestHeadersSpec<?> request = method == HttpMethod.POST
+                ? restClient.post()
+                        .uri(uri)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(jsonBody)
+                : restClient.get().uri(uri);
+
+        return request.exchange((httpRequest, response) -> {
+                    try (ClientHttpResponse closed = response) {
                         int status = response.getStatusCode().value();
                         boolean tooLarge = exceedsCap(
                                 response.getBody(),

@@ -1,6 +1,7 @@
 package com.karimmajed.flowforge.validation;
 
 import com.karimmajed.flowforge.enums.StepType;
+import com.karimmajed.flowforge.http.HttpJson;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -80,21 +81,66 @@ public class StepConfigurationValidator {
     }
 
     private void validateHttpRequest(Map<String, Object> config) {
-
-        if (!config.keySet().equals(Set.of("method", "url"))) {
-            throw badRequest(
-                "HTTP_REQUEST requires 'method' and 'url'"
-            );
+        if (!config.containsKey("method")) {
+            throw badRequest("HTTP_REQUEST requires 'method' and 'url'");
         }
 
         Object method = config.get("method");
-        Object url = config.get("url");
 
-        if (!(method instanceof String httpMethod)
-                || !"GET".equals(httpMethod)) {
-            throw badRequest("Method must be GET");
+        if (!(method instanceof String httpMethod)) {
+            throw badRequest("Method must be GET or POST");
         }
 
+        if ("GET".equals(httpMethod)) {
+            if (!config.keySet().equals(Set.of("method", "url"))) {
+                throw badRequest(
+                    "HTTP_REQUEST requires 'method' and 'url'"
+                );
+            }
+            validateHttpsUrl(config.get("url"));
+            return;
+        }
+
+        if (!"POST".equals(httpMethod)) {
+            throw badRequest("Method must be GET or POST");
+        }
+
+        if (!config.containsKey("url") || !config.containsKey("bodySource")) {
+            throw badRequest(
+                "HTTP POST requires 'method', 'url', and 'bodySource'"
+            );
+        }
+
+        Object source = config.get("bodySource");
+
+        if (!(source instanceof String bodySource)
+                || (!"STATIC_JSON".equals(bodySource)
+                        && !"WORKFLOW_PAYLOAD".equals(bodySource))) {
+            throw badRequest(
+                "HTTP body source must be STATIC_JSON or WORKFLOW_PAYLOAD"
+            );
+        }
+
+        Set<String> expected = "STATIC_JSON".equals(bodySource)
+                ? Set.of("method", "url", "bodySource", "body")
+                : Set.of("method", "url", "bodySource");
+
+        if (!config.keySet().equals(expected)) {
+            throw badRequest("HTTP POST does not allow extra fields");
+        }
+
+        validateHttpsUrl(config.get("url"));
+
+        if ("STATIC_JSON".equals(bodySource)) {
+            try {
+                HttpJson.bytes(config.get("body"));
+            } catch (IllegalArgumentException ex) {
+                throw badRequest(ex.getMessage());
+            }
+        }
+    }
+
+    private void validateHttpsUrl(Object url) {
         if (!(url instanceof String urlString)
                 || urlString.length() > 2048) {
             throw badRequest("Invalid URL");

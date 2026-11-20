@@ -35,6 +35,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
 import javax.sql.DataSource;
 
 import java.net.InetAddress;
@@ -92,6 +95,9 @@ class WorkflowExecutionCheckpointIntegrationTest {
 
     @Autowired
     private HttpsGetExecutor httpGet;
+
+    @Autowired
+    private ExecutionCheckpointStore checkpoints;
 
     @Autowired
     private DataSource dataSource;
@@ -527,9 +533,178 @@ class WorkflowExecutionCheckpointIntegrationTest {
     }
 
     @Test
-    void postIsRejectedWithoutARequest() throws Exception {
+    void postSendsStaticJsonOrTheOriginalPayload() throws Exception {
+        long staticWorkflow = insertWorkflow();
+        insertPostStep(
+                staticWorkflow,
+                "Notify",
+                1,
+                """
+                {"method":"POST","url":"https://allowed.example/orders","bodySource":"STATIC_JSON","body":{"count":2,"ok":true,"label":"ada","note":null}}
+                """);
+        long staticId = insertExecution(staticWorkflow, "QUEUED", "{\"secret\":\"do-not-send\"}");
+        long payloadWorkflow = insertWorkflow();
+        long payloadStep = insertPostStep(
+                payloadWorkflow,
+                "Forward",
+                1,
+                """
+                {"method":"POST","url":"https://allowed.example/orders","bodySource":"WORKFLOW_PAYLOAD"}
+                """);
+        long payloadId = insertExecution(
+                payloadWorkflow,
+                "QUEUED",
+                "{\"count\":3,\"ok\":false,\"label\":\"ada\"}");
+        ScriptedHttp transport = new ScriptedHttp();
+        transport.checkNoTransaction = true;
+        transport.respond(201, "created".getBytes());
+        transport.respond(200, new byte[0]);
+        processor.setHttpGet(httpExecutor(transport));
+
+        processor.process(staticId);
+        processor.process(payloadId);
+
+        assertThat(transport.sawOpenTransaction).isFalse();
+        assertThat(transport.methods).containsExactly(HttpMethod.POST, HttpMethod.POST);
+        JsonNode staticBody = JsonMapper.builder().build().readTree(transport.bodies().get(0));
+        JsonNode payloadBody = JsonMapper.builder().build().readTree(transport.bodies().get(1));
+        assertThat(staticBody.get("count").isNumber()).isTrue();
+        assertThat(staticBody.get("count").asInt()).isEqualTo(2);
+        assertThat(staticBody.get("ok").isBoolean()).isTrue();
+        assertThat(staticBody.get("ok").asBoolean()).isTrue();
+        assertThat(staticBody.get("label").asString()).isEqualTo("ada");
+        assertThat(staticBody.get("note").isNull()).isTrue();
+        assertThat(payloadBody.get("count").asInt()).isEqualTo(3);
+        assertThat(payloadBody.get("ok").asBoolean()).isFalse();
+        assertThat(payloadBody.get("label").asString()).isEqualTo("ada");
+        assertThat(String.join("\n", transport.bodies())).doesNotContain("do-not-send", "created");
+        assertThat(executionStatus(staticId)).isEqualTo("SUCCEEDED");
+        assertThat(executionStatus(payloadId)).isEqualTo("SUCCEEDED");
+        assertThat(checkpoints(payloadId)).containsExactly(
+                new SavedCheckpoint(payloadStep, "SUCCEEDED", 1, null));
+    }
+
+    @Test
+    void postFailureDoesNotRetryAndACrashIsNotReplayed() throws Exception {
+        long statusWorkflow = insertWorkflow();
+        long statusId = insertPostStep(
+                statusWorkflow,
+                "Notify",
+                1,
+                """
+                {"method":"POST","url":"https://allowed.example/orders","bodySource":"WORKFLOW_PAYLOAD"}
+                """);
+        long statusExecution = insertExecution(statusWorkflow, "QUEUED", "{}");
+        ScriptedHttp status = new ScriptedHttp();
+        status.respond(500, "secret-body".getBytes());
+        processor.setHttpGet(httpExecutor(status));
+
+        processor.process(statusExecution);
+        processor.process(statusExecution);
+
+        assertThat(status.uris).hasSize(1);
+        assertThat(failureReason(statusExecution)).isEqualTo("HTTP status 500");
+        assertThat(failureReason(statusExecution)).doesNotContain("secret-body");
+        assertThat(checkpoints(statusExecution)).containsExactly(
+                new SavedCheckpoint(statusId, "FAILED", 1, "HTTP status 500"));
+
+        long crashWorkflow = insertWorkflow();
+        long crashId = insertPostStep(
+                crashWorkflow,
+                "Notify",
+                1,
+                """
+                {"method":"POST","url":"https://allowed.example/orders","bodySource":"STATIC_JSON","body":{"ok":true}}
+                """);
+        long crashExecution = insertExecution(crashWorkflow, "QUEUED", "{}");
+        ScriptedHttp crash = new ScriptedHttp();
+        crash.respond(200, new byte[0]);
+        processor.setHttpGet(httpExecutor(crash));
+        jdbc.execute("""
+                CREATE FUNCTION flowforge_fail_checkpoint_success()
+                RETURNS trigger
+                LANGUAGE plpgsql
+                AS $func$
+                BEGIN
+                    IF NEW.status = 'SUCCEEDED' THEN
+                        RAISE EXCEPTION 'forced checkpoint update failure';
+                    END IF;
+                    RETURN NEW;
+                END;
+                $func$
+                """);
+        jdbc.execute("""
+                CREATE TRIGGER flowforge_fail_checkpoint_success
+                BEFORE UPDATE ON execution_step_checkpoints
+                FOR EACH ROW
+                EXECUTE FUNCTION flowforge_fail_checkpoint_success()
+                """);
+
+        assertThrows(Exception.class, () -> processor.process(crashExecution));
+        jdbc.execute("DROP TRIGGER flowforge_fail_checkpoint_success ON execution_step_checkpoints");
+        processor.process(crashExecution);
+
+        assertThat(crash.uris).hasSize(1);
+        assertThat(executionStatus(crashExecution)).isEqualTo("RUNNING");
+        assertThat(checkpoints(crashExecution)).containsExactly(
+                new SavedCheckpoint(crashId, "RUNNING", 1, null));
+
+        jdbc.update("""
+                UPDATE execution_step_checkpoints
+                SET lease_until = CURRENT_TIMESTAMP - INTERVAL '1 minute'
+                WHERE execution_id = ?
+                """,
+                crashExecution);
+        assertThat(checkpoints.recoverIfExpired(crashExecution)).isTrue();
+        processor.process(crashExecution);
+
+        assertThat(crash.uris).hasSize(1);
+        assertThat(executionStatus(crashExecution)).isEqualTo("FAILED");
+        assertThat(failureReason(crashExecution))
+                .isEqualTo("Execution lease expired during step Notify; outcome may be unknown.");
+    }
+
+    @Test
+    void duplicatePostDeliveryDoesNotSendAgain() throws Exception {
         long workflowId = insertWorkflow();
-        long httpId = insertHttpStep(workflowId, "Notify", 1, "POST", "https://allowed.example/orders");
+        insertPostStep(
+                workflowId,
+                "Notify",
+                1,
+                """
+                {"method":"POST","url":"https://allowed.example/orders","bodySource":"STATIC_JSON","body":{"ok":true}}
+                """);
+        long executionId = insertExecution(workflowId, "QUEUED", "{}");
+        ScriptedHttp transport = new ScriptedHttp();
+        transport.respond(200, new byte[0]);
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        transport.entered = entered;
+        transport.release = release;
+        processor.setHttpGet(httpExecutor(transport));
+        ExecutorService pool = Executors.newFixedThreadPool(1);
+        try {
+            Future<?> running = pool.submit(() -> processor.process(executionId));
+            assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue();
+
+            processor.process(executionId);
+
+            assertThat(transport.uris).hasSize(1);
+            release.countDown();
+            running.get(10, TimeUnit.SECONDS);
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+
+        assertThat(transport.uris).hasSize(1);
+        assertThat(executionStatus(executionId)).isEqualTo("SUCCEEDED");
+    }
+
+    @Test
+    void putIsRejectedWithoutARequest() throws Exception {
+        long workflowId = insertWorkflow();
+        long httpId = insertHttpStep(workflowId, "Notify", 1, "PUT", "https://allowed.example/orders");
         long executionId = insertExecution(workflowId, "QUEUED", "{}");
         ScriptedHttp transport = new ScriptedHttp();
         processor.setHttpGet(httpExecutor(transport));
@@ -538,9 +713,9 @@ class WorkflowExecutionCheckpointIntegrationTest {
 
         assertThat(transport.uris).isEmpty();
         assertThat(executionStatus(executionId)).isEqualTo("FAILED");
-        assertThat(failureReason(executionId)).isEqualTo("Unsupported HTTP method: POST");
+        assertThat(failureReason(executionId)).isEqualTo("Unsupported HTTP method: PUT");
         assertThat(checkpoints(executionId)).containsExactly(
-                new SavedCheckpoint(httpId, "FAILED", 1, "Unsupported HTTP method: POST"));
+                new SavedCheckpoint(httpId, "FAILED", 1, "Unsupported HTTP method: PUT"));
     }
 
     @Test
@@ -645,6 +820,26 @@ class WorkflowExecutionCheckpointIntegrationTest {
                         throw new IllegalStateException(ex);
                     }
                 });
+    }
+
+    private long insertPostStep(
+            long workflowId,
+            String name,
+            int position,
+            String configuration) {
+
+        return jdbc.queryForObject("""
+                INSERT INTO workflow_steps (
+                    workflow_id, name, step_type, position, configuration
+                )
+                VALUES (?, ?, 'HTTP_REQUEST', ?, CAST(? AS jsonb))
+                RETURNING id
+                """,
+                Long.class,
+                workflowId,
+                name,
+                position,
+                configuration);
     }
 
     private long insertHttpStep(
@@ -812,6 +1007,12 @@ class WorkflowExecutionCheckpointIntegrationTest {
 
         private final List<HttpMethod> methods = new ArrayList<>();
 
+        private final List<MockClientHttpRequest> sent = new ArrayList<>();
+
+        private CountDownLatch entered;
+
+        private CountDownLatch release;
+
         private RuntimeException failure;
 
         private boolean checkNoTransaction;
@@ -840,12 +1041,28 @@ class WorkflowExecutionCheckpointIntegrationTest {
                     DataSourceUtils.releaseConnection(connection, dataSource);
                 }
             }
+            if (entered != null) {
+                entered.countDown();
+                try {
+                    if (!release.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("POST was not released");
+                    }
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(ex);
+                }
+            }
             if (failure != null) {
                 throw failure;
             }
             MockClientHttpRequest request = new MockClientHttpRequest(method, uri);
+            sent.add(request);
             request.setResponse(responses.remove());
             return request;
+        }
+
+        private List<String> bodies() {
+            return sent.stream().map(MockClientHttpRequest::getBodyAsString).toList();
         }
     }
 

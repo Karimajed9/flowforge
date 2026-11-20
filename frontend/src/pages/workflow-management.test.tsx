@@ -2,7 +2,11 @@
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { renderApp } from '../test/renderApp.tsx'
-import { buildHttpRequestConfiguration } from '../lib/workflowForm.ts'
+import {
+  buildHttpRequestConfiguration,
+  httpDraftDiffers,
+  httpDraftFrom,
+} from '../lib/workflowForm.ts'
 
 afterEach(() => {
   cleanup()
@@ -330,8 +334,8 @@ test('adding an HTTPS GET step sends method GET', async () => {
 
   renderAt('/workflows/4')
   expect(await screen.findByRole('heading', { name: 'Add HTTPS GET' })).toBeTruthy()
-  expect(screen.queryByRole('option', { name: 'POST' })).toBeNull()
-  expect(screen.getByText('Method').nextElementSibling?.textContent).toBe('GET')
+  expect((document.getElementById('http-step-method') as HTMLSelectElement).value).toBe('GET')
+  expect(screen.queryByLabelText('JSON body')).toBeNull()
   fireEvent.change(input('http-step-name'), { target: { value: 'Call API' } })
   fireEvent.change(input('http-step-position'), { target: { value: '2' } })
   fireEvent.change(input('http-step-url'), {
@@ -341,6 +345,61 @@ test('adding an HTTPS GET step sends method GET', async () => {
 
   expect(await screen.findByRole('heading', { name: 'Call API' })).toBeTruthy()
   expect(screen.getByText('GET https://example.com/orders')).toBeTruthy()
+})
+
+test('adding an HTTPS POST step sends static JSON with its types', async () => {
+  installFetch((call) => {
+    if (call.method === 'GET' && call.url === '/api/workflows/4') {
+      return json(workflow())
+    }
+    if (call.method === 'GET') {
+      return json([])
+    }
+    expect(call.body).toEqual({
+      name: 'Notify',
+      stepType: 'HTTP_REQUEST',
+      position: 1,
+      configuration: {
+        method: 'POST',
+        url: 'https://example.com/orders',
+        bodySource: 'STATIC_JSON',
+        body: { count: 2, ok: true, label: 'ada', note: null },
+      },
+    })
+    return json(
+      {
+        id: 8,
+        name: 'Notify',
+        stepType: 'HTTP_REQUEST',
+        position: 1,
+        configuration: {
+          method: 'POST',
+          url: 'https://example.com/orders',
+          bodySource: 'STATIC_JSON',
+          body: { count: 2, ok: true, label: 'ada', note: null },
+        },
+      },
+      201,
+    )
+  })
+
+  renderAt('/workflows/4')
+  expect(await screen.findByRole('heading', { name: 'Add HTTPS GET' })).toBeTruthy()
+  fireEvent.change(input('http-step-name'), { target: { value: 'Notify' } })
+  fireEvent.change(input('http-step-position'), { target: { value: '1' } })
+  fireEvent.change(document.getElementById('http-step-method') as HTMLSelectElement, {
+    target: { value: 'POST' },
+  })
+  fireEvent.change(input('http-step-url'), {
+    target: { value: 'https://example.com/orders' },
+  })
+  fireEvent.change(document.getElementById('http-step-body') as HTMLTextAreaElement, {
+    target: { value: '{"count":2,"ok":true,"label":"ada","note":null}' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Add HTTPS POST' }))
+
+  expect(await screen.findByText('POST https://example.com/orders')).toBeTruthy()
+  expect(screen.getByText('Static JSON')).toBeTruthy()
 })
 
 test('invalid URLs and unsupported methods are rejected before a request', async () => {
@@ -365,14 +424,132 @@ test('invalid URLs and unsupported methods are rejected before a request', async
 
   expect(await screen.findByText('A valid HTTPS URL is required')).toBeTruthy()
   expect(calls.some((call) => call.method === 'POST')).toBe(false)
-  expect(buildHttpRequestConfiguration('POST', 'https://example.com/hook')).toEqual({
+  expect(buildHttpRequestConfiguration('POST', 'https://example.com/hook', {
+    source: 'STATIC_JSON',
+    text: '{',
+  })).toEqual({
     ok: false,
-    message: 'Method must be GET',
+    message: 'JSON is invalid',
+  })
+  expect(buildHttpRequestConfiguration('GET', 'https://example.com/hook')).toEqual({
+    ok: true,
+    configuration: { method: 'GET', url: 'https://example.com/hook' },
   })
   expect(buildHttpRequestConfiguration('PUT', 'https://example.com/hook').ok).toBe(false)
   expect(
     buildHttpRequestConfiguration('GET', 'https://user:secret@example.com/hook').ok,
   ).toBe(false)
+})
+
+const UNSAFE_INTEGER =
+  "Integer exceeds JavaScript's safe range (±9007199254740991). Send it as a JSON string if the receiver accepts that."
+
+test('static JSON rejects integers JavaScript cannot store exactly', () => {
+  const url = 'https://example.com/hook'
+  const saved = buildHttpRequestConfiguration('POST', url, {
+    source: 'STATIC_JSON',
+    text: '{"count":2,"ok":true,"label":"ada","note":null,"ratio":1.5,"items":[1,false,null]}',
+  })
+
+  expect(saved).toEqual({
+    ok: true,
+    configuration: {
+      method: 'POST',
+      url,
+      bodySource: 'STATIC_JSON',
+      body: {
+        count: 2,
+        ok: true,
+        label: 'ada',
+        note: null,
+        ratio: 1.5,
+        items: [1, false, null],
+      },
+    },
+  })
+  expect(buildHttpRequestConfiguration('GET', url)).toEqual({
+    ok: true,
+    configuration: { method: 'GET', url },
+  })
+  for (const text of [
+    '9007199254740991',
+    '-9007199254740991',
+    '1e2',
+    '1.5',
+    '0.1',
+    '{"id":"9007199254740993","note":"1e+16"}',
+    '{"order":{"id":"9007199254740993"},"tags":["9007199254740992"]}',
+  ]) {
+    expect(buildHttpRequestConfiguration('POST', url, { source: 'STATIC_JSON', text }).ok, text).toBe(
+      true,
+    )
+  }
+  for (const text of [
+    '9007199254740992',
+    '9007199254740993',
+    '-9007199254740993',
+    '{"order":{"id":9007199254740993}}',
+    '[1, -9007199254740993]',
+    '[{"id":9007199254740992}]',
+    '9.007199254740993e15',
+    '1e+16',
+    '1.000e16',
+  ]) {
+    expect(buildHttpRequestConfiguration('POST', url, { source: 'STATIC_JSON', text }), text).toEqual({
+      ok: false,
+      message: UNSAFE_INTEGER,
+    })
+  }
+
+  const loaded = {
+    method: 'POST' as const,
+    url,
+    bodySource: 'STATIC_JSON' as const,
+    body: { count: 2, ok: true, label: 'ada', note: null },
+  }
+  const draft = httpDraftFrom(loaded)
+  expect(httpDraftDiffers(loaded, draft)).toBe(false)
+  expect(
+    buildHttpRequestConfiguration(draft.method, draft.url, {
+      source: draft.bodySource,
+      text: draft.bodyText,
+    }),
+  ).toEqual({ ok: true, configuration: loaded })
+
+  const alreadyRounded = httpDraftFrom({ ...loaded, body: 9007199254740992 })
+  expect(alreadyRounded.bodyText).toBe('9007199254740992')
+  expect(
+    buildHttpRequestConfiguration('POST', url, {
+      source: 'STATIC_JSON',
+      text: alreadyRounded.bodyText,
+    }).ok,
+  ).toBe(false)
+})
+
+test('adding a POST step shows the safe-integer error and does not save', async () => {
+  const calls = installFetch((call) => {
+    if (call.method === 'GET' && call.url === '/api/workflows/4') {
+      return json(workflow())
+    }
+    if (call.method === 'GET') {
+      return json([])
+    }
+    return json({ detail: 'should not be called' }, 500)
+  })
+
+  renderAt('/workflows/4')
+  expect(await screen.findByRole('heading', { name: 'Add HTTPS GET' })).toBeTruthy()
+  fireEvent.change(input('http-step-name'), { target: { value: 'Notify' } })
+  fireEvent.change(input('http-step-position'), { target: { value: '1' } })
+  fireEvent.change(document.getElementById('http-step-method') as HTMLSelectElement, {
+    target: { value: 'POST' },
+  })
+  fireEvent.change(input('http-step-url'), { target: { value: 'https://example.com/orders' } })
+  fireEvent.change(textArea('http-step-body'), { target: { value: '{"id":9007199254740993}' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Add HTTPS POST' }))
+
+  expect(await screen.findByText(UNSAFE_INTEGER)).toBeTruthy()
+  expect(calls.some((call) => call.method === 'POST')).toBe(false)
 })
 
 test('step API validation failures stay on the form', async () => {

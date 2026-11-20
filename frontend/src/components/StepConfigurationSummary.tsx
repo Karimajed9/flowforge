@@ -21,10 +21,19 @@ export function StepConfigurationSummary({
     const method =
       typeof step.configuration.method === 'string' ? step.configuration.method : '—'
     const url = typeof step.configuration.url === 'string' ? step.configuration.url : '—'
+    const source =
+      step.configuration.bodySource === 'STATIC_JSON'
+        ? 'Static JSON'
+        : step.configuration.bodySource === 'WORKFLOW_PAYLOAD'
+          ? 'Workflow payload'
+          : null
     return (
-      <p className="mt-3 text-sm text-muted">
-        {method} {url}
-      </p>
+      <div className="mt-3 text-sm text-muted">
+        <p>
+          {method} {url}
+        </p>
+        {method === 'POST' && source ? <p>{source}</p> : null}
+      </div>
     )
   }
 

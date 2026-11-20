@@ -3,6 +3,7 @@ package com.karimmajed.flowforge.service;
 import com.karimmajed.flowforge.enums.StepType;
 import com.karimmajed.flowforge.exception.NonRetryableExecutionException;
 import com.karimmajed.flowforge.http.HttpGetResult;
+import com.karimmajed.flowforge.http.HttpJson;
 import com.karimmajed.flowforge.http.HttpsGetExecutor;
 import com.karimmajed.flowforge.service.ExecutionCheckpointStore.Claim;
 import com.karimmajed.flowforge.service.ExecutionCheckpointStore.Completion;
@@ -16,12 +17,16 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -95,16 +100,87 @@ class WorkflowExecutionProcessorTest {
 
     @Test
     void unsupportedHttpMethodFailsWithoutARequest() {
-        StepWork work = httpWork("POST", "https://allowed.example/orders");
+        StepWork work = httpWork("PUT", "https://allowed.example/orders");
 
         when(store.claimNext(21L)).thenReturn(Claim.step(work));
-        when(store.fail(work, "Unsupported HTTP method: POST")).thenReturn(true);
+        when(store.fail(work, "Unsupported HTTP method: PUT")).thenReturn(true);
 
         processor.process(21L);
 
-        verify(store).fail(work, "Unsupported HTTP method: POST");
+        verify(store).fail(work, "Unsupported HTTP method: PUT");
         verify(httpGet, never()).get(anyString());
+        verify(httpGet, never()).post(anyString(), org.mockito.ArgumentMatchers.any());
         verify(store, never()).complete(work);
+    }
+
+    @Test
+    void postSendsTheConfiguredJsonOnce() {
+        LinkedHashMap<String, Object> body = new LinkedHashMap<>();
+        body.put("count", 2);
+        body.put("ok", true);
+        body.put("label", "ada");
+        body.put("note", null);
+        StepWork work = new StepWork(
+                21L,
+                8L,
+                "Notify",
+                StepType.HTTP_REQUEST,
+                Map.of(
+                        "method", "POST",
+                        "url", "https://allowed.example/orders",
+                        "bodySource", "STATIC_JSON",
+                        "body", body),
+                Map.of("secret", "do-not-send"),
+                "attempt-1",
+                1);
+        byte[] json = HttpJson.bytes(body);
+
+        when(store.claimNext(21L)).thenReturn(Claim.step(work));
+        when(httpGet.post(eq("https://allowed.example/orders"), argThat(actual ->
+                Arrays.equals(actual, json)))).thenReturn(new HttpGetResult(
+                        HttpGetResult.Outcome.SUCCESS,
+                        201,
+                        Duration.ofMillis(5)));
+        when(store.complete(work)).thenReturn(Completion.FINISHED);
+
+        processor.process(21L);
+
+        verify(httpGet).post(eq("https://allowed.example/orders"), argThat(actual ->
+                Arrays.equals(actual, json)));
+        verify(httpGet, never()).get(anyString());
+        verify(store, never()).fail(eq(work), anyString());
+    }
+
+    @Test
+    void postSendsTheOriginalWorkflowPayload() {
+        Map<String, Object> payload = Map.of("orderId", "o-1", "count", 3);
+        StepWork work = new StepWork(
+                21L,
+                8L,
+                "Notify",
+                StepType.HTTP_REQUEST,
+                Map.of(
+                        "method", "POST",
+                        "url", "https://allowed.example/orders",
+                        "bodySource", "WORKFLOW_PAYLOAD"),
+                payload,
+                "attempt-1",
+                1);
+        byte[] json = HttpJson.bytes(payload);
+
+        when(store.claimNext(21L)).thenReturn(Claim.step(work));
+        when(httpGet.post(eq("https://allowed.example/orders"), argThat(actual ->
+                Arrays.equals(actual, json)))).thenReturn(new HttpGetResult(
+                        HttpGetResult.Outcome.SUCCESS,
+                        200,
+                        Duration.ofMillis(5)));
+        when(store.complete(work)).thenReturn(Completion.FINISHED);
+
+        processor.process(21L);
+
+        verify(httpGet).post(eq("https://allowed.example/orders"), argThat(actual ->
+                Arrays.equals(actual, json)));
+        verify(httpGet, never()).get(anyString());
     }
 
     @Test

@@ -186,7 +186,8 @@ test('editing an HTTPS GET step keeps the method as GET', async () => {
   renderAt('/workflows/4')
   expect(await screen.findByText('GET https://example.com/hook')).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: 'Edit Call API' }))
-  expect(screen.getByText('Method: GET')).toBeTruthy()
+  expect((document.getElementById('step-method-9') as HTMLSelectElement).value).toBe('GET')
+  expect(screen.queryByLabelText('JSON body')).toBeNull()
   fireEvent.change(document.getElementById('step-name-9') as HTMLInputElement, {
     target: { value: 'Fetch orders' },
   })
@@ -716,4 +717,156 @@ test('invalid JSON does not clear dirty', async () => {
     target: { value: 'Check fields' },
   })
   expect(leaveBlocked()).toBe(true)
+})
+
+test('selecting POST saves JSON types and reloads them', async () => {
+  const saved = {
+    method: 'POST',
+    url: 'https://example.com/orders',
+    bodySource: 'STATIC_JSON',
+    body: { count: 2, ok: true, label: 'ada', note: null },
+  }
+  const calls = installFetch((call) => {
+    if (call.method === 'PATCH') {
+      return json({
+        step: { ...steps[1], configuration: saved },
+        stepRevision: 4,
+      })
+    }
+    return json({ detail: 'Not found' }, 404)
+  })
+
+  renderAt('/workflows/4')
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Call API' }))
+  fireEvent.change(document.getElementById('step-method-9') as HTMLSelectElement, {
+    target: { value: 'POST' },
+  })
+  fireEvent.change(document.getElementById('step-url-9') as HTMLInputElement, {
+    target: { value: 'https://example.com/orders' },
+  })
+  fireEvent.change(document.getElementById('step-body-9') as HTMLTextAreaElement, {
+    target: { value: '{"count":2,"ok":true,"label":"ada","note":null}' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  expect(await screen.findByText('POST https://example.com/orders')).toBeTruthy()
+  expect(screen.getByText('Static JSON')).toBeTruthy()
+  expect(calls.find((call) => call.method === 'PATCH')?.body).toEqual({
+    name: 'Call API',
+    configuration: saved,
+    revision: 3,
+  })
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Call API' }))
+  expect((document.getElementById('step-body-9') as HTMLTextAreaElement).value).toBe(
+    '{"count":2,"ok":true,"label":"ada","note":null}',
+  )
+})
+
+test('invalid POST JSON stays in the editor until it is corrected', async () => {
+  const calls = installFetch((call) => {
+    if (call.method === 'PATCH') {
+      return json({
+        step: {
+          ...steps[1],
+          configuration: {
+            method: 'POST',
+            url: 'https://example.com/hook',
+            bodySource: 'STATIC_JSON',
+            body: 1,
+          },
+        },
+        stepRevision: 4,
+      })
+    }
+    return json({ detail: 'Not found' }, 404)
+  })
+
+  renderAt('/workflows/4')
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Call API' }))
+  fireEvent.change(document.getElementById('step-method-9') as HTMLSelectElement, {
+    target: { value: 'POST' },
+  })
+  const body = document.getElementById('step-body-9') as HTMLTextAreaElement
+  fireEvent.change(body, { target: { value: '{' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  expect(await screen.findByText('JSON is invalid')).toBeTruthy()
+  expect(calls.some((call) => call.method === 'PATCH')).toBe(false)
+  expect(body.value).toBe('{')
+
+  fireEvent.change(body, { target: { value: '1' } })
+  expect(screen.queryByText('JSON is invalid')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  expect(await screen.findByText('POST https://example.com/hook')).toBeTruthy()
+  expect(calls.find((call) => call.method === 'PATCH')?.body).toMatchObject({
+    configuration: {
+      method: 'POST',
+      url: 'https://example.com/hook',
+      bodySource: 'STATIC_JSON',
+      body: 1,
+    },
+  })
+})
+
+test('an unsafe integer stays unsaved when editing a step', async () => {
+  const calls = installFetch(() => json({ detail: 'should not be called' }, 500))
+
+  renderAt('/workflows/4')
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Call API' }))
+  fireEvent.change(document.getElementById('step-method-9') as HTMLSelectElement, {
+    target: { value: 'POST' },
+  })
+  const body = document.getElementById('step-body-9') as HTMLTextAreaElement
+  fireEvent.change(body, { target: { value: '{"id":9007199254740993}' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  expect(
+    await screen.findByText(
+      "Integer exceeds JavaScript's safe range (±9007199254740991). Send it as a JSON string if the receiver accepts that.",
+    ),
+  ).toBeTruthy()
+  expect(calls.some((call) => call.method === 'PATCH')).toBe(false)
+  expect(body.value).toBe('{"id":9007199254740993}')
+})
+
+test('switching a step back to GET saves the URL only', async () => {
+  const calls = installFetch((call) => {
+    if (call.method === 'PATCH') {
+      return json({
+        step: {
+          ...steps[1],
+          configuration: { method: 'GET', url: 'https://example.com/orders' },
+        },
+        stepRevision: 4,
+      })
+    }
+    return json({ detail: 'Not found' }, 404)
+  })
+
+  renderAt('/workflows/4')
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Call API' }))
+  fireEvent.change(document.getElementById('step-method-9') as HTMLSelectElement, {
+    target: { value: 'POST' },
+  })
+  fireEvent.change(document.getElementById('step-body-source-9') as HTMLSelectElement, {
+    target: { value: 'WORKFLOW_PAYLOAD' },
+  })
+  expect(screen.queryByLabelText('JSON body')).toBeNull()
+  fireEvent.change(document.getElementById('step-method-9') as HTMLSelectElement, {
+    target: { value: 'GET' },
+  })
+  fireEvent.change(document.getElementById('step-url-9') as HTMLInputElement, {
+    target: { value: 'https://example.com/orders' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  expect(await screen.findByText('GET https://example.com/orders')).toBeTruthy()
+  expect(screen.queryByText('Workflow payload')).toBeNull()
+  expect(calls.find((call) => call.method === 'PATCH')?.body).toEqual({
+    name: 'Call API',
+    configuration: { method: 'GET', url: 'https://example.com/orders' },
+    revision: 3,
+  })
 })

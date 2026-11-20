@@ -12,6 +12,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -58,6 +59,52 @@ class StepConfigurationValidatorTest {
                 StepType.HTTP_REQUEST,
                 Map.of("method", "GET", "url", "HTTPS://example.com/Callback")))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    void acceptsHttpsPostBodiesAndRejectsInvalidJson() {
+        LinkedHashMap<String, Object> body = new LinkedHashMap<>();
+        body.put("count", 2);
+        body.put("ok", true);
+        body.put("label", "ada");
+        body.put("note", null);
+
+        assertThatCode(() -> validator.validate(
+                StepType.HTTP_REQUEST,
+                Map.of(
+                        "method", "POST",
+                        "url", "https://example.com/orders",
+                        "bodySource", "STATIC_JSON",
+                        "body", body)))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> validator.validate(
+                StepType.HTTP_REQUEST,
+                Map.of(
+                        "method", "POST",
+                        "url", "https://example.com/orders",
+                        "bodySource", "WORKFLOW_PAYLOAD")))
+                .doesNotThrowAnyException();
+
+        ResponseStatusException invalid = assertThrows(
+                ResponseStatusException.class,
+                () -> validator.validate(
+                        StepType.HTTP_REQUEST,
+                        Map.of(
+                                "method", "POST",
+                                "url", "https://example.com/orders",
+                                "bodySource", "STATIC_JSON",
+                                "body", new Object())));
+        assertBadRequest(invalid, "HTTP body must be JSON");
+
+        ResponseStatusException source = assertThrows(
+                ResponseStatusException.class,
+                () -> validator.validate(
+                        StepType.HTTP_REQUEST,
+                        Map.of(
+                                "method", "POST",
+                                "url", "https://example.com/orders",
+                                "bodySource", "XML")));
+        assertBadRequest(source, "HTTP body source must be STATIC_JSON or WORKFLOW_PAYLOAD");
     }
 
     @Test
@@ -175,32 +222,32 @@ class StepConfigurationValidatorTest {
                         "http method PUT",
                         StepType.HTTP_REQUEST,
                         Map.of("method", "PUT", "url", "https://example.com"),
-                        "Method must be GET"),
+                        "Method must be GET or POST"),
                 args(
-                        "http method POST",
+                        "http method POST without a body source",
                         StepType.HTTP_REQUEST,
                         Map.of("method", "POST", "url", "https://example.com"),
-                        "Method must be GET"),
+                        "HTTP POST requires 'method', 'url', and 'bodySource'"),
                 args(
                         "http method PATCH",
                         StepType.HTTP_REQUEST,
                         Map.of("method", "PATCH", "url", "https://example.com"),
-                        "Method must be GET"),
+                        "Method must be GET or POST"),
                 args(
                         "http method DELETE",
                         StepType.HTTP_REQUEST,
                         Map.of("method", "DELETE", "url", "https://example.com"),
-                        "Method must be GET"),
+                        "Method must be GET or POST"),
                 args(
                         "http method lowercase",
                         StepType.HTTP_REQUEST,
                         Map.of("method", "get", "url", "https://example.com"),
-                        "Method must be GET"),
+                        "Method must be GET or POST"),
                 args(
                         "http method is not a string",
                         StepType.HTTP_REQUEST,
                         Map.of("method", 1, "url", "https://example.com"),
-                        "Method must be GET"),
+                        "Method must be GET or POST"),
                 args(
                         "url is not a string",
                         StepType.HTTP_REQUEST,

@@ -3,6 +3,7 @@ package com.karimmajed.flowforge.service;
 import com.karimmajed.flowforge.enums.StepType;
 import com.karimmajed.flowforge.exception.NonRetryableExecutionException;
 import com.karimmajed.flowforge.http.HttpGetResult;
+import com.karimmajed.flowforge.http.HttpJson;
 import com.karimmajed.flowforge.http.HttpsGetExecutor;
 import com.karimmajed.flowforge.service.ExecutionCheckpointStore.Claim;
 import com.karimmajed.flowforge.service.ExecutionCheckpointStore.Completion;
@@ -168,7 +169,7 @@ public class WorkflowExecutionProcessor {
             throw new StepFailure("HTTP method is missing");
         }
 
-        if (!"GET".equals(httpMethod)) {
+        if (!"GET".equals(httpMethod) && !"POST".equals(httpMethod)) {
             throw new StepFailure("Unsupported HTTP method: " + httpMethod);
         }
 
@@ -176,7 +177,9 @@ public class WorkflowExecutionProcessor {
             throw new StepFailure("HTTP URL is missing");
         }
 
-        HttpGetResult result = httpGet.get(urlString);
+        HttpGetResult result = "POST".equals(httpMethod)
+                ? httpGet.post(urlString, postBody(work))
+                : httpGet.get(urlString);
 
         switch (result.outcome()) {
             case SUCCESS -> {
@@ -189,6 +192,33 @@ public class WorkflowExecutionProcessor {
             case BLOCKED -> throw new StepFailure("HTTP destination blocked");
             case RESPONSE_TOO_LARGE -> throw new StepFailure(
                     "HTTP response too large");
+        }
+    }
+
+    private static byte[] postBody(StepWork work) {
+        Object source = work.configuration().get("bodySource");
+
+        if (!(source instanceof String bodySource) || bodySource.isBlank()) {
+            throw new StepFailure("HTTP body source is missing");
+        }
+
+        Object value;
+
+        if ("STATIC_JSON".equals(bodySource)) {
+            if (!work.configuration().containsKey("body")) {
+                throw new StepFailure("HTTP body is missing");
+            }
+            value = work.configuration().get("body");
+        } else if ("WORKFLOW_PAYLOAD".equals(bodySource)) {
+            value = work.payload() == null ? Map.of() : work.payload();
+        } else {
+            throw new StepFailure("Unsupported HTTP body source");
+        }
+
+        try {
+            return HttpJson.bytes(value);
+        } catch (IllegalArgumentException ex) {
+            throw new StepFailure(ex.getMessage());
         }
     }
 
