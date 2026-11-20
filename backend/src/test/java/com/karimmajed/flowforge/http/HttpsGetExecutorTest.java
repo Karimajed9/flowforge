@@ -242,6 +242,90 @@ class HttpsGetExecutorTest {
     }
 
     @Test
+    void postSendsJsonAndDoesNotFollowARedirect() throws Exception {
+        ScriptedTransport transport = new ScriptedTransport();
+        transport.respond(201, TOKEN.getBytes());
+        MockClientHttpResponse redirect = new MockClientHttpResponse(new byte[0], 302);
+        redirect.getHeaders().setLocation(URI.create("https://evil.example/steal"));
+        transport.respond(redirect);
+        HttpsGetExecutor executor = executor(
+                List.of("allowed.example"),
+                transport,
+                publicOnly("allowed.example"));
+        byte[] body = HttpJson.bytes(Map.of(
+                "count", 2,
+                "ok", true,
+                "label", "ada"));
+
+        HttpGetResult created = executor.post("https://allowed.example/orders", body);
+
+        assertThat(created.outcome()).isEqualTo(HttpGetResult.Outcome.SUCCESS);
+        assertThat(created.statusCode()).isEqualTo(201);
+        assertThat(created.toString()).doesNotContain(TOKEN);
+        assertThat(transport.methods).containsExactly(HttpMethod.POST);
+        assertThat(transport.sent.get(0).getHeaders().getContentType())
+                .isEqualTo(org.springframework.http.MediaType.APPLICATION_JSON);
+        assertThat(transport.sent.get(0).getBodyAsString()).isEqualTo(HttpJson.text(body));
+
+        HttpGetResult redirected = executor.post("https://allowed.example/orders", body);
+
+        assertThat(redirected.outcome()).isEqualTo(HttpGetResult.Outcome.HTTP_STATUS);
+        assertThat(redirected.statusCode()).isEqualTo(302);
+        assertThat(transport.uris).containsExactly(
+                URI.create("https://allowed.example/orders"),
+                URI.create("https://allowed.example/orders"));
+        assertThat(redirected.toString()).doesNotContain("evil.example");
+    }
+
+    @Test
+    void postUsesTheSameBlocksTimeoutsAndResponseCap() throws Exception {
+        ScriptedTransport blocked = new ScriptedTransport();
+        RecordingLookup rebind = new RecordingLookup();
+        rebind.allow("rebind.example", "8.8.8.8", "10.1.1.1");
+        HttpsGetExecutor guarded = executor(List.of("rebind.example"), blocked, rebind);
+        byte[] body = HttpJson.bytes(Map.of("ok", true));
+
+        assertThat(guarded.post("https://rebind.example/admin", body).outcome())
+                .isEqualTo(HttpGetResult.Outcome.BLOCKED);
+        assertThat(guarded.post("https://10.0.0.5/", body).outcome())
+                .isEqualTo(HttpGetResult.Outcome.BLOCKED);
+        assertThat(blocked.uris).isEmpty();
+
+        ScriptedTransport timeout = new ScriptedTransport();
+        timeout.fail(new ResourceAccessException(
+                "timed out",
+                new HttpTimeoutException("request timed out")));
+        timeout.fail(new ResourceAccessException(
+                "connect timed out",
+                new java.net.SocketTimeoutException("connect timed out")));
+        HttpsGetExecutor slow = executor(
+                List.of("allowed.example"),
+                timeout,
+                publicOnly("allowed.example"));
+
+        assertThat(slow.post("https://allowed.example/read", body).outcome())
+                .isEqualTo(HttpGetResult.Outcome.TIMEOUT);
+        assertThat(slow.post("https://allowed.example/connect", body).outcome())
+                .isEqualTo(HttpGetResult.Outcome.TIMEOUT);
+
+        CountingStream huge = new CountingStream(10_000);
+        ScriptedTransport transport = new ScriptedTransport();
+        transport.respond(new MockClientHttpResponse(huge, 500));
+        HttpGetProperties properties = properties(List.of("allowed.example"));
+        properties.setMaxResponseBytes(32);
+        HttpsGetExecutor capped = new HttpsGetExecutor(
+                properties,
+                RestClient.builder().requestFactory(transport).build(),
+                publicOnly("allowed.example"));
+
+        HttpGetResult tooLarge = capped.post("https://allowed.example/huge", body);
+
+        assertThat(tooLarge.outcome()).isEqualTo(HttpGetResult.Outcome.RESPONSE_TOO_LARGE);
+        assertThat(tooLarge.statusCode()).isEqualTo(500);
+        assertThat(huge.read).isEqualTo(33);
+    }
+
+    @Test
     void oversizedResponseStopsReading() throws Exception {
         CountingStream body = new CountingStream(10_000);
         ScriptedTransport transport = new ScriptedTransport();
@@ -465,7 +549,9 @@ class HttpsGetExecutorTest {
 
         private final List<HttpMethod> methods = new ArrayList<>();
 
-        private RuntimeException failure;
+        private final List<MockClientHttpRequest> sent = new ArrayList<>();
+
+        private final Queue<RuntimeException> failures = new ArrayDeque<>();
 
         void respond(int status, byte[] body) {
             responses.add(new MockClientHttpResponse(body, status));
@@ -476,7 +562,7 @@ class HttpsGetExecutorTest {
         }
 
         void fail(RuntimeException failure) {
-            this.failure = failure;
+            failures.add(failure);
         }
 
         int remainingResponses() {
@@ -487,10 +573,11 @@ class HttpsGetExecutorTest {
         public ClientHttpRequest createRequest(URI uri, HttpMethod method) {
             uris.add(uri);
             methods.add(method);
-            if (failure != null) {
-                throw failure;
+            if (!failures.isEmpty()) {
+                throw failures.remove();
             }
             MockClientHttpRequest request = new MockClientHttpRequest(method, uri);
+            sent.add(request);
             request.setResponse(responses.remove());
             return request;
         }

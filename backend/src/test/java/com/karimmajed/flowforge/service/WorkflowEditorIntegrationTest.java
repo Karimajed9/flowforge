@@ -156,12 +156,12 @@ class WorkflowEditorIntegrationTest {
                 step.id(),
                 new UpdateWorkflowStepRequest(
                         "Fetch orders",
-                        Map.of("method", "POST", "url", "https://example.com/orders"),
+                        Map.of("method", "PUT", "url", "https://example.com/orders"),
                         2L),
                 OWNER)).isInstanceOf(StepChangeException.class).actual();
 
         assertThat(invalid.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
-        assertThat(invalid.getMessage()).isEqualTo("Method must be GET");
+        assertThat(invalid.getMessage()).isEqualTo("Method must be GET or POST");
         assertThat(configuration(step.id())).contains("https://example.com/orders/open");
     }
 
