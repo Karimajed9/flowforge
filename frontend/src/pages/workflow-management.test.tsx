@@ -552,6 +552,112 @@ test('adding a POST step shows the safe-integer error and does not save', async 
   expect(calls.some((call) => call.method === 'POST')).toBe(false)
 })
 
+const CHANGED_DECIMAL =
+  'Decimal does not survive JSON parsing unchanged. Send it as a JSON string if the receiver accepts that.'
+const UNDERFLOW =
+  'Decimal underflows to 0 in JavaScript. Send it as a JSON string if the receiver accepts that.'
+const OVERFLOW =
+  "Decimal overflows JavaScript's number range. Send it as a JSON string if the receiver accepts that."
+
+test('static JSON rejects decimals JavaScript cannot keep', () => {
+  const url = 'https://example.com/hook'
+  const ordinary = buildHttpRequestConfiguration('POST', url, {
+    source: 'STATIC_JSON',
+    text: '{"price":49.99,"tax":0.1,"weight":123.456,"items":[1.5,-0.1]}',
+  })
+  expect(ordinary).toEqual({
+    ok: true,
+    configuration: {
+      method: 'POST',
+      url,
+      bodySource: 'STATIC_JSON',
+      body: { price: 49.99, tax: 0.1, weight: 123.456, items: [1.5, -0.1] },
+    },
+  })
+  expect(buildHttpRequestConfiguration('GET', url)).toEqual({
+    ok: true,
+    configuration: { method: 'GET', url },
+  })
+
+  for (const text of [
+    '0.1',
+    '49.99',
+    '123.456',
+    '1.2300',
+    '0.10',
+    '1.5e-1',
+    '1e-7',
+    '1E-7',
+    '{"note":"0.12345678901234567890123456789","tiny":"1e-400","huge":"1e309"}',
+    '{"rate":"1.0000000000000001"}',
+  ]) {
+    expect(buildHttpRequestConfiguration('POST', url, { source: 'STATIC_JSON', text }).ok, text).toBe(
+      true,
+    )
+  }
+
+  for (const text of [
+    '1.0000000000000001',
+    '0.12345678901234567890123456789',
+    '-1.0000000000000001',
+    '{"order":{"rate":0.12345678901234567890123456789}}',
+    '[49.99, 1.234567890123456789e-5]',
+    '1.234567890123456789e-5',
+  ]) {
+    expect(buildHttpRequestConfiguration('POST', url, { source: 'STATIC_JSON', text }), text).toEqual({
+      ok: false,
+      message: CHANGED_DECIMAL,
+    })
+  }
+
+  for (const text of ['1e-324', '1e-400', '-1.5e-324', '{"n":1e-400}']) {
+    expect(buildHttpRequestConfiguration('POST', url, { source: 'STATIC_JSON', text }), text).toEqual({
+      ok: false,
+      message: UNDERFLOW,
+    })
+  }
+
+  const overflow = `${'9'.repeat(309)}.1`
+  expect(
+    buildHttpRequestConfiguration('POST', url, {
+      source: 'STATIC_JSON',
+      text: `{"n":${overflow}}`,
+    }),
+  ).toEqual({ ok: false, message: OVERFLOW })
+  expect(buildHttpRequestConfiguration('POST', url, { source: 'STATIC_JSON', text: '1e309' })).toEqual({
+    ok: false,
+    message: UNSAFE_INTEGER,
+  })
+})
+
+test('adding a POST step shows the decimal error and does not save', async () => {
+  const calls = installFetch((call) => {
+    if (call.method === 'GET' && call.url === '/api/workflows/4') {
+      return json(workflow())
+    }
+    if (call.method === 'GET') {
+      return json([])
+    }
+    return json({ detail: 'should not be called' }, 500)
+  })
+
+  renderAt('/workflows/4')
+  expect(await screen.findByRole('heading', { name: 'Add HTTPS GET' })).toBeTruthy()
+  fireEvent.change(input('http-step-name'), { target: { value: 'Notify' } })
+  fireEvent.change(input('http-step-position'), { target: { value: '1' } })
+  fireEvent.change(document.getElementById('http-step-method') as HTMLSelectElement, {
+    target: { value: 'POST' },
+  })
+  fireEvent.change(input('http-step-url'), { target: { value: 'https://example.com/orders' } })
+  fireEvent.change(textArea('http-step-body'), {
+    target: { value: '{"rate":0.12345678901234567890123456789}' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Add HTTPS POST' }))
+
+  expect(await screen.findByText(CHANGED_DECIMAL)).toBeTruthy()
+  expect(calls.some((call) => call.method === 'POST')).toBe(false)
+})
+
 test('step API validation failures stay on the form', async () => {
   installFetch((call) => {
     if (call.method === 'GET' && call.url === '/api/workflows/4') {
