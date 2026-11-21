@@ -57,6 +57,15 @@ const SAFE_INTEGER_LIMIT = '9007199254740991'
 const UNSAFE_INTEGER_MESSAGE =
   "Integer exceeds JavaScript's safe range (±9007199254740991). Send it as a JSON string if the receiver accepts that."
 
+const CHANGED_DECIMAL_MESSAGE =
+  'Decimal does not survive JSON parsing unchanged. Send it as a JSON string if the receiver accepts that.'
+
+const UNDERFLOW_MESSAGE =
+  'Decimal underflows to 0 in JavaScript. Send it as a JSON string if the receiver accepts that.'
+
+const OVERFLOW_MESSAGE =
+  "Decimal overflows JavaScript's number range. Send it as a JSON string if the receiver accepts that."
+
 const JSON_NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/
 
 export function parseJsonValue(
@@ -72,15 +81,16 @@ export function parseJsonValue(
   } catch {
     return { ok: false, message: 'JSON is invalid' }
   }
-  // JSON.parse rounds integers outside the safe range. Reject the original
-  // literal before that rounded value can be saved.
-  if (containsUnsafeInteger(text)) {
-    return { ok: false, message: UNSAFE_INTEGER_MESSAGE }
+  // JSON.parse rounds the literal before the value can be saved. Compare the
+  // original number token, not the already rounded JavaScript value.
+  const literalError = numericLiteralError(text)
+  if (literalError) {
+    return { ok: false, message: literalError }
   }
   return { ok: true, value }
 }
 
-function containsUnsafeInteger(text: string): boolean {
+function numericLiteralError(text: string): string | null {
   let index = 0
   while (index < text.length) {
     const character = text[index]
@@ -90,15 +100,29 @@ function containsUnsafeInteger(text: string): boolean {
     }
     if (character === '-' || (character >= '0' && character <= '9')) {
       const token = JSON_NUMBER.exec(text.slice(index))
-      if (token && unsafeIntegerLiteral(token[0])) {
-        return true
+      if (token) {
+        const message = literalError(token[0])
+        if (message) {
+          return message
+        }
       }
       index += token && token[0].length > 0 ? token[0].length : 1
       continue
     }
     index += 1
   }
-  return false
+  return null
+}
+
+function literalError(token: string): string | null {
+  const kind = integerLiteralClass(token)
+  if (kind === 'unsafe') {
+    return UNSAFE_INTEGER_MESSAGE
+  }
+  if (kind !== 'fraction') {
+    return null
+  }
+  return fractionalLiteralError(token)
 }
 
 function endOfString(text: string, open: number): number {
@@ -116,51 +140,99 @@ function endOfString(text: string, open: number): number {
   return text.length
 }
 
-function unsafeIntegerLiteral(token: string): boolean {
+function integerLiteralClass(token: string): 'unsafe' | 'safe' | 'fraction' | 'invalid' {
   const match = /^(-?)(0|[1-9]\d*)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(token)
   if (!match) {
-    return false
+    return 'invalid'
   }
   const intPart = match[2]
   const fracPart = match[3] ?? ''
   const digits = intPart + fracPart
   if (/^0+$/.test(digits)) {
-    return false
+    return 'safe'
   }
   const exponent = readExponent(match[4])
   if (exponent === 'huge+') {
-    return true
+    return 'unsafe'
   }
-  if (exponent === 'huge-' || exponent === 'bad') {
-    return false
+  if (exponent === 'bad') {
+    return 'invalid'
+  }
+  if (exponent === 'huge-') {
+    return 'fraction'
   }
   const point = intPart.length + exponent
   if (point <= 0) {
-    return false
+    return 'fraction'
   }
   if (point < digits.length && !/^0*$/.test(digits.slice(point))) {
-    return false
+    return 'fraction'
   }
   let start = 0
   while (start < point && start < digits.length && digits[start] === '0') {
     start += 1
   }
   if (start >= point) {
-    return false
+    return 'safe'
   }
   const length = point - start
   if (length > SAFE_INTEGER_LIMIT.length) {
-    return true
+    return 'unsafe'
   }
   if (length < SAFE_INTEGER_LIMIT.length) {
-    return false
+    return 'safe'
   }
   let compared = ''
   for (let offset = 0; offset < length; offset += 1) {
     const digitIndex = start + offset
     compared += digitIndex < digits.length ? digits[digitIndex] : '0'
   }
-  return compared > SAFE_INTEGER_LIMIT
+  return compared > SAFE_INTEGER_LIMIT ? 'unsafe' : 'safe'
+}
+
+function fractionalLiteralError(token: string): string | null {
+  const parsed = JSON.parse(token) as number
+  if (typeof parsed !== 'number' || !Number.isFinite(parsed)) {
+    return OVERFLOW_MESSAGE
+  }
+  if (parsed === 0) {
+    return UNDERFLOW_MESSAGE
+  }
+  const serialized = JSON.stringify(parsed)
+  if (canonicalDecimal(token) !== canonicalDecimal(serialized)) {
+    return CHANGED_DECIMAL_MESSAGE
+  }
+  return null
+}
+
+function canonicalDecimal(token: string): string | null {
+  const match = /^(-?)(0|[1-9]\d*)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(token)
+  if (!match) {
+    return null
+  }
+  const sign = match[1] === '-' ? '-' : ''
+  const intPart = match[2]
+  const fracPart = match[3] ?? ''
+  const exponent = readExponent(match[4])
+  if (typeof exponent !== 'number') {
+    return null
+  }
+  const rawDigits = intPart + fracPart
+  if (/^0+$/.test(rawDigits)) {
+    return '0'
+  }
+  let lead = 0
+  while (lead < rawDigits.length - 1 && rawDigits[lead] === '0') {
+    lead += 1
+  }
+  let digits = rawDigits.slice(lead)
+  let end = digits.length
+  while (end > 1 && digits[end - 1] === '0') {
+    end -= 1
+  }
+  digits = digits.slice(0, end)
+  const power = intPart.length - 1 + exponent - lead
+  return sign + digits + 'e' + String(power)
 }
 
 function readExponent(raw: string | undefined): number | 'huge+' | 'huge-' | 'bad' {

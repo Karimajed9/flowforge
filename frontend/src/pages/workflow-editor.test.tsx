@@ -831,6 +831,27 @@ test('an unsafe integer stays unsaved when editing a step', async () => {
   expect(body.value).toBe('{"id":9007199254740993}')
 })
 
+test('a decimal that would change stays unsaved when editing a step', async () => {
+  const calls = installFetch(() => json({ detail: 'should not be called' }, 500))
+
+  renderAt('/workflows/4')
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Call API' }))
+  fireEvent.change(document.getElementById('step-method-9') as HTMLSelectElement, {
+    target: { value: 'POST' },
+  })
+  const body = document.getElementById('step-body-9') as HTMLTextAreaElement
+  fireEvent.change(body, { target: { value: '{"rate":1.0000000000000001}' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  expect(
+    await screen.findByText(
+      'Decimal does not survive JSON parsing unchanged. Send it as a JSON string if the receiver accepts that.',
+    ),
+  ).toBeTruthy()
+  expect(calls.some((call) => call.method === 'PATCH')).toBe(false)
+  expect(body.value).toBe('{"rate":1.0000000000000001}')
+})
+
 test('switching a step back to GET saves the URL only', async () => {
   const calls = installFetch((call) => {
     if (call.method === 'PATCH') {
